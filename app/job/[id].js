@@ -11,9 +11,14 @@ export default function JobDetailsScreen() {
   const router = useRouter();
   const [job, setJob] = useState(null);
   const [applicants, setApplicants] = useState([]);
+  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
     if (id) {
       fetchData();
     }
@@ -21,7 +26,7 @@ export default function JobDetailsScreen() {
 
   async function fetchData() {
     console.log("Loading Job ID:", id);
-    
+
     // 1. Get Job Info
     const { data: jobData, error: jobError } = await supabase.from('jobs').select('*').eq('id', id).single();
     if (jobError) console.log("Job Error:", jobError);
@@ -31,48 +36,68 @@ export default function JobDetailsScreen() {
     // We join with profiles to get the applicant's name and avatar
     const { data: appData, error: appError } = await supabase
       .from('applications')
-      .select('*, profiles(username, full_name, avatar_url)') 
+      .select('*, profiles(username, full_name, avatar_url)')
       .eq('job_id', id);
 
     if (appError) console.log("App Error:", appError);
     if (appData) setApplicants(appData);
-    
+
     setLoading(false);
   }
 
   async function handleApprove(applicantId, applicationId) {
     Alert.alert("Confirm Hire", "Hire this person? This will reject all other applicants.", [
       { text: "Cancel" },
-      { 
-        text: "Yes, Hire", 
+      {
+        text: "Yes, Hire",
         onPress: async () => {
           setLoading(true);
           try {
+            console.log("Starting Hire Process...");
+
             // 1. Mark Job as ACCEPTED
+            console.log("Updating Job Status...");
             const { error: jobErr } = await supabase
               .from('jobs')
               .update({ status: 'ACCEPTED', accepted_by: applicantId })
               .eq('id', id);
-            if (jobErr) throw jobErr;
+
+            if (jobErr) {
+              console.error("Job Update Error:", jobErr);
+              throw new Error("Failed to update job status: " + jobErr.message);
+            }
 
             // 2. Mark this application as APPROVED
+            console.log("Approving Application:", applicationId);
             const { error: appErr } = await supabase
               .from('applications')
               .update({ status: 'APPROVED' })
               .eq('id', applicationId);
-            if (appErr) throw appErr;
+
+            if (appErr) {
+              console.error("App Update Error:", appErr);
+              throw new Error("Failed to approve application: " + appErr.message);
+            }
 
             // 3. REJECT all other applications for this job
-            await supabase
+            console.log("Rejecting other applications...");
+            const { error: rejectErr } = await supabase
               .from('applications')
               .update({ status: 'REJECTED' })
               .eq('job_id', id)
               .neq('id', applicationId);
 
+            if (rejectErr) {
+              console.error("Reject Error (Non-critical):", rejectErr);
+              // We don't throw here to avoid rolling back the success of the hire
+            }
+
             Alert.alert("Success", "Applicant hired!");
-            router.back(); // Return to previous screen
+            router.back();
           } catch (error) {
+            console.error("Hire Process Failed:", error);
             Alert.alert("Error", error.message);
+          } finally {
             setLoading(false);
           }
         }
@@ -91,7 +116,7 @@ export default function JobDetailsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -105,9 +130,9 @@ export default function JobDetailsScreen() {
           <Text style={styles.jobTitle}>{job?.title || "Unknown Job"}</Text>
           <Text style={styles.jobPrice}>{job?.amount ? `$${job.amount}` : "N/A"}</Text>
           <View style={[styles.statusBadge, { backgroundColor: job?.status === 'OPEN' ? '#e1f5fe' : '#e0e0e0' }]}>
-             <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
-               {job?.status || 'LOADING'}
-             </Text>
+            <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
+              {job?.status || 'LOADING'}
+            </Text>
           </View>
         </View>
 
@@ -118,7 +143,7 @@ export default function JobDetailsScreen() {
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingBottom: 50 }}
           renderItem={({ item }) => {
-            const user = item.profiles || {}; 
+            const user = item.profiles || {};
             const name = user.full_name || user.username || "Unknown";
 
             return (
@@ -131,16 +156,16 @@ export default function JobDetailsScreen() {
                   )}
                   <View>
                     <Text style={styles.name}>{name}</Text>
-                    <Text style={[styles.date, { 
-                      color: item.status === 'APPROVED' ? 'green' : item.status === 'REJECTED' ? 'red' : '#888' 
+                    <Text style={[styles.date, {
+                      color: item.status === 'APPROVED' ? 'green' : item.status === 'REJECTED' ? 'red' : '#888'
                     }]}>
                       Status: {item.status}
                     </Text>
                   </View>
                 </View>
 
-                {/* Only show Hire button if job is OPEN and this app is PENDING */}
-                {job?.status === 'OPEN' && item.status === 'PENDING' && (
+                {/* Only show Hire button if job is OPEN, app is PENDING, AND current user is OWNER */}
+                {job?.status === 'OPEN' && item.status === 'PENDING' && session?.user?.id === job.user_id && (
                   <TouchableOpacity style={styles.hireBtn} onPress={() => handleApprove(item.applicant_id, item.id)}>
                     <Text style={styles.btnText}>Hire This Person</Text>
                   </TouchableOpacity>

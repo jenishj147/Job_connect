@@ -85,6 +85,23 @@ create table if not exists public.applications (
   status text default 'PENDING'
 );
 
+-- Ensure applications FK has ON DELETE CASCADE
+do $$
+begin
+  -- Check if constraint exists, if so, we might need to drop and re-add if it doesn't have cascade, 
+  -- but checking for cascade specifically is hard in simple DO block without inspecting pg_constraint.
+  -- Simpler approach: Drop the constraint if it exists and re-add it with CASCADE.
+  if exists (select 1 from pg_constraint where conname = 'applications_job_id_fkey') then
+    alter table public.applications drop constraint applications_job_id_fkey;
+  end if;
+
+  alter table public.applications
+    add constraint applications_job_id_fkey
+    foreign key (job_id)
+    references public.jobs(id)
+    on delete cascade;
+end $$;
+
 alter table public.applications enable row level security;
 
 drop policy if exists "Applicants handles own applications" on applications;
@@ -104,6 +121,15 @@ create policy "Job Owners can view applications for their jobs"
 drop policy if exists "Job Owners can delete applications for their jobs" on applications;
 create policy "Job Owners can delete applications for their jobs"
   on applications for delete
+  using (
+    auth.uid() in (
+      select user_id from jobs where id = job_id
+    )
+  );
+
+drop policy if exists "Job Owners can update applications for their jobs" on applications;
+create policy "Job Owners can update applications for their jobs"
+  on applications for update
   using (
     auth.uid() in (
       select user_id from jobs where id = job_id

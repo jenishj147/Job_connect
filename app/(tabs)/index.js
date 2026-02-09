@@ -119,8 +119,8 @@ export default function MyJobsScreen() {
 
     if (error) {
       console.error("Delete Error:", error);
-      setLastError(error.message); // Show on screen
-      Alert.alert("Delete Failed", error.message);
+      Alert.alert("Delete Failed", `Error Code: ${error.code}\nMessage: ${error.message}\nDetails: ${JSON.stringify(error)}`);
+      setLastError(error.message);
     } else {
       console.log("Delete Success");
 

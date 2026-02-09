@@ -68,20 +68,20 @@ export default function RootLayout() {
       <Stack.Screen name="login" options={{ gestureEnabled: false }} />
 
       {/* Sub-Screens */}
-      <Stack.Screen 
-        name="job/[id]" 
-        options={{ 
-          presentation: 'modal', 
-          headerShown: false 
-        }} 
+      <Stack.Screen
+        name="job/[id]"
+        options={{
+          presentation: 'modal',
+          headerShown: false
+        }}
       />
-      
-      <Stack.Screen 
-        name="my-applications" 
-        options={{ 
+
+      <Stack.Screen
+        name="my-applications"
+        options={{
           presentation: 'card',
-          headerShown: false 
-        }} 
+          headerShown: false
+        }}
       />
     </Stack>
   );
