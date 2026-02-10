@@ -7,7 +7,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Platform,
+  Platform, // 👈 Important
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -21,6 +21,7 @@ import { supabase } from '../../supabase';
 export default function ProfileScreen() {
   const router = useRouter();
   const isMounted = useRef(true);
+  const isWeb = Platform.OS === 'web';
 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -37,7 +38,6 @@ export default function ProfileScreen() {
   useEffect(() => {
     isMounted.current = true;
     
-    // Get Session & Profile
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (isMounted.current) {
         setSession(session);
@@ -47,6 +47,15 @@ export default function ProfileScreen() {
 
     return () => { isMounted.current = false; };
   }, []);
+
+  // 🟢 Helper for Cross-Platform Alerts
+  const notify = (title, msg) => {
+    if (isWeb) {
+      window.alert(`${title}: ${msg}`);
+    } else {
+      Alert.alert(title, msg);
+    }
+  };
 
   async function getProfile(currentSession) {
     try {
@@ -68,49 +77,93 @@ export default function ProfileScreen() {
         setBio(data.bio || '');
       }
     } catch (error) {
-      if (isMounted.current) Alert.alert('Error', error.message);
+      if (isMounted.current) notify('Error', error.message);
     } finally {
       if (isMounted.current) setLoading(false);
     }
   }
 
+  // 📸 OPTION 1: Pick from Gallery (Works on Web & Mobile)
   async function pickImage() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.5, // Optimize size for faster uploads
+        quality: 0.5,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const image = result.assets[0];
-        await uploadImage(image.uri);
+        await uploadImage(result.assets[0].uri);
       }
     } catch (error) {
-      Alert.alert('Selection Error', error.message);
+      notify('Error', error.message);
     }
   }
 
+  // 📷 OPTION 2: Take Photo (Mobile Only)
+  async function takePhoto() {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (permission.status !== 'granted') {
+        notify("Permission Denied", "We need camera access to take a photo.");
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        await uploadImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      notify('Error', error.message);
+    }
+  }
+
+  // 🟢 MENU HANDLER (Web vs Mobile)
+  const handleImageChange = () => {
+    // 🌐 WEB: Browsers treat "File Picker" as both Camera & Gallery automatically
+    if (isWeb) {
+      pickImage();
+      return;
+    }
+
+    // 📱 MOBILE: Show custom action sheet
+    Alert.alert(
+      "Update Profile Photo",
+      "Choose an option",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Take Photo", onPress: takePhoto },
+        { text: "Choose from Library", onPress: pickImage },
+      ]
+    );
+  };
+
+  // 🚀 UPLOAD LOGIC
   async function uploadImage(uri) {
     if (!session?.user) return;
     
     try {
       setUploading(true);
 
-      // 1. Fetch file from local device
+      // 1. Fetch file (Works on Web Blob URLs too)
       const response = await fetch(uri);
       const blob = await response.blob();
+      const arrayBuffer = await new Response(blob).arrayBuffer();
 
       // 2. Construct filename
       const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpeg';
       const fileName = `${session.user.id}/${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
 
-      // 3. Upload to Supabase
+      // 3. Upload
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, blob, {
+        .upload(fileName, arrayBuffer, {
           contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
           upsert: true,
         });
@@ -118,17 +171,28 @@ export default function ProfileScreen() {
       if (uploadError) throw uploadError;
 
       // 4. Get Public URL
-      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
       
       if (isMounted.current) {
         setAvatarUrl(data.publicUrl);
+        await updateProfileField({ avatar_url: data.publicUrl });
       }
 
     } catch (error) {
-      Alert.alert('Upload Failed', error.message);
+      console.error("Upload failed:", error);
+      notify('Upload Failed', "Could not upload image. Check permissions.");
     } finally {
       if (isMounted.current) setUploading(false);
     }
+  }
+
+  async function updateProfileField(updates) {
+    const { error } = await supabase.from('profiles').upsert({
+        id: session.user.id,
+        updated_at: new Date(),
+        ...updates
+    });
+    if (error) console.log("Auto-save error:", error);
   }
 
   async function saveAllChanges() {
@@ -150,15 +214,24 @@ export default function ProfileScreen() {
       const { error } = await supabase.from('profiles').upsert(updates);
       if (error) throw error;
       
-      Alert.alert('Success', 'Profile updated successfully!');
+      notify('Success', 'Profile updated successfully!');
     } catch (error) {
-      Alert.alert('Update Error', error.message);
+      notify('Update Error', error.message);
     } finally {
       if (isMounted.current) setLoading(false);
     }
   }
 
   const handleSignOut = async () => {
+    // 🌐 Web Logic
+    if (isWeb) {
+      if (window.confirm("Are you sure you want to log out?")) {
+        await supabase.auth.signOut();
+      }
+      return;
+    }
+
+    // 📱 Mobile Logic
     Alert.alert(
       "Sign Out",
       "Are you sure you want to log out?",
@@ -176,12 +249,16 @@ export default function ProfileScreen() {
     );
   };
 
+  // 🟢 Safe Wrapper Component
+  const Wrapper = isWeb ? View : KeyboardAvoidingView;
+  const wrapperProps = isWeb ? { style: { flex: 1 } } : { 
+    behavior: Platform.OS === "ios" ? "padding" : "height",
+    style: { flex: 1 }
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
+      <Wrapper {...wrapperProps}>
         <ScrollView 
           style={styles.container} 
           contentContainerStyle={{ paddingBottom: 40, alignItems: 'center' }}
@@ -200,7 +277,6 @@ export default function ProfileScreen() {
                 </View>
               )}
               
-              {/* Overlay Loader while uploading */}
               {uploading && (
                 <View style={styles.uploadingOverlay}>
                   <ActivityIndicator color="white" />
@@ -210,7 +286,7 @@ export default function ProfileScreen() {
 
             <TouchableOpacity 
               style={styles.changeAvatarButton} 
-              onPress={pickImage} 
+              onPress={handleImageChange} 
               disabled={uploading}
             >
               <FontAwesome name="camera" size={16} color="white" />
@@ -218,7 +294,7 @@ export default function ProfileScreen() {
           </View>
 
           <Text style={styles.subHeader}>
-            {uploading ? "Uploading..." : "Tap camera to change photo"}
+            {uploading ? "Uploading..." : isWeb ? "Click to change photo" : "Tap camera to change photo"}
           </Text>
 
           {/* QUICK LINKS */}
@@ -306,7 +382,7 @@ export default function ProfileScreen() {
           </View>
 
         </ScrollView>
-      </KeyboardAvoidingView>
+      </Wrapper>
     </SafeAreaView>
   );
 }
@@ -337,7 +413,7 @@ const styles = StyleSheet.create({
   changeAvatarButton: {
     position: 'absolute',
     bottom: 0,
-    right: 110, // Adjusted to sit nicely next to avatar
+    right: 110, 
     backgroundColor: '#007AFF',
     width: 36,
     height: 36,
@@ -349,7 +425,7 @@ const styles = StyleSheet.create({
     elevation: 6
   },
 
-  // Action Card (My Apps)
+  // Action Card
   actionCard: { 
     flexDirection: 'row', 
     backgroundColor: 'white', 

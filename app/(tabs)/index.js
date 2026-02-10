@@ -1,7 +1,17 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useFocusEffect, useRouter } from 'expo-router'; // Added useFocusEffect
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  FlatList,
+  Platform // 👈 Import Platform
+  ,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
 import JobCard from '../../components/JobCard';
 import PostJobForm from '../../components/PostJobForm';
 import { supabase } from '../../supabase';
@@ -62,24 +72,24 @@ export default function MyJobsScreen() {
 
     try {
       // B. Delete the job directly
-      // (We rely on the SQL 'ON DELETE CASCADE' to handle applications)
       const { error, count } = await supabase
         .from('jobs')
         .delete()
         .eq('id', jobId)
-        .select(); // Required to get 'count'
+        .select();
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      // If count is 0, it means the database didn't find the item or RLS blocked it
       if (count === 0) {
         throw new Error("Database permission denied or Item not found.");
       }
 
       console.log("✅ Delete Successful on Server");
-      Alert.alert("Success", "Job post deleted.");
+      
+      // Only show success alert on mobile to avoid blocking flow
+      if (Platform.OS !== 'web') {
+        Alert.alert("Success", "Job post deleted.");
+      }
 
     } catch (error) {
       console.error("❌ Delete Failed:", error.message);
@@ -88,13 +98,25 @@ export default function MyJobsScreen() {
       setJobs(previousJobs);
       Alert.alert(
         "Delete Failed", 
-        "Could not delete this job. \n\nTip: Ensure you have run the SQL fix in Supabase to allow deleting jobs with applications."
+        "Could not delete this job. Ensure you have internet connection."
       );
     }
   }
 
+  // 5. ✅ WEB-COMPATIBLE CONFIRMATION
   function confirmDelete(id) {
     console.log("👉 Confirm Dialog Open for ID:", id);
+
+    // 🌐 WEB: Use browser native confirm
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm("Are you sure you want to delete this job? This cannot be undone.");
+      if (confirmed) {
+        deleteJob(id);
+      }
+      return;
+    }
+
+    // 📱 MOBILE: Use Native Alert
     Alert.alert(
       "Delete Job",
       "Are you sure? This will remove the job and all its applications.",
@@ -118,6 +140,12 @@ export default function MyJobsScreen() {
   }
 
   async function handleSignOut() {
+    // 🌐 WEB: Confirm logout on web too
+    if (Platform.OS === 'web') {
+        const confirmed = window.confirm("Are you sure you want to sign out?");
+        if (!confirmed) return;
+    }
+    
     await supabase.auth.signOut();
     router.replace('/login');
   }
@@ -170,7 +198,7 @@ export default function MyJobsScreen() {
               // ✅ 1. Navigation Logic
               onPress={() => router.push({ pathname: "/job/[id]", params: { id: item.id } })}
               
-              // ✅ 2. Delete Logic (With Debug Log)
+              // ✅ 2. Delete Logic
               onDelete={() => {
                 console.log("🗑️ Parent received DELETE request for:", item.id);
                 confirmDelete(item.id);

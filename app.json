@@ -16,6 +16,7 @@
       }
     },
     "android": {
+      "package": "com.jenish147.jobconnect",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -23,8 +24,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.jenish147.JobConnect"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
@@ -42,6 +42,13 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow JobConnect to access your photos to update your profile.",
+          "cameraPermission": "Allow JobConnect to use your camera to take a profile picture."
         }
       ]
     ],
