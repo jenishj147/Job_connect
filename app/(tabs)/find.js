@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  FlatList,
-  Text,
-  Alert,
   ActivityIndicator,
+  Alert,
+  FlatList,
   RefreshControl,
-  SafeAreaView
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View
 } from 'react-native';
 // 👇 Check this path: it assumes find.js is in app/(tabs)/
-import { supabase } from '../../supabase';
 import * as Location from 'expo-location';
 import JobCard from '../../components/JobCard';
+import { supabase } from '../../supabase';
 
 export default function FindJobsScreen() {
   const [jobs, setJobs] = useState([]);

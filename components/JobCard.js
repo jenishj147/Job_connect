@@ -1,83 +1,129 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export default function JobCard({ title, amount, profile, onDelete, onEdit, onApply, isOwner, applicationStatus }) {
-  // Handle case where profile might be null or missing
-  const username = profile?.username || profile?.full_name || 'Anonymous';
-  const avatarUrl = profile?.avatar_url;
+export default function JobCard({ 
+  title, 
+  amount, 
+  profile, 
+  isOwner, 
+  onDelete, 
+  onEdit, 
+  onApply,
+  onPress, // Navigation action (Go to Details)
+  applicationStatus, // 'APPLIED', 'HIRED', 'PENDING'
+  distanceText // Optional: '5.4 km'
+}) {
+
+  // Helper to render the button based on status (for Non-Owners)
+  const renderApplyButton = () => {
+    const status = applicationStatus ? applicationStatus.toUpperCase() : null;
+
+    if (status === 'HIRED' || status === 'APPROVED') {
+        return (
+            <View style={[styles.statusBadge, { backgroundColor: '#34C759' }]}>
+                <FontAwesome name="check" size={14} color="white" />
+                <Text style={styles.statusText}>Hired</Text>
+            </View>
+        );
+    }
+    if (status === 'PENDING' || status === 'APPLIED') {
+        return (
+            <View style={[styles.statusBadge, { backgroundColor: '#FF9500' }]}>
+                <FontAwesome name="clock-o" size={14} color="white" />
+                <Text style={styles.statusText}>Applied</Text>
+            </View>
+        );
+    }
+    
+    // Default: Show Apply Button
+    return (
+        <TouchableOpacity style={styles.applyBtn} onPress={onApply}>
+            <Text style={styles.applyBtnText}>Apply Now</Text>
+        </TouchableOpacity>
+    );
+  };
 
   return (
+    // 🟢 1. Main Container is a VIEW (Not a Button) to prevent touch conflicts
     <View style={styles.card}>
-      {/* Header: Profile Pic & Name */}
-      <View style={styles.header}>
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-        ) : (
-          <View style={styles.placeholder}>
-            <FontAwesome name="user" size={16} color="#666" />
+      
+      {/* 🟢 2. Top Content Area (Triggers Navigation) */}
+      <TouchableOpacity 
+        style={styles.contentArea} 
+        activeOpacity={0.7}
+        onPress={() => {
+          console.log("👉 Navigating to Job Details...");
+          if (onPress) onPress();
+        }}
+      >
+        <View style={styles.header}>
+          <View style={styles.userInfo}>
+            {/* Avatar Handling */}
+            {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
+            ) : (
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <FontAwesome name="user" size={20} color="#fff" />
+                </View>
+            )}
+            
+            <View>
+              <Text style={styles.username}>
+                {profile?.full_name || profile?.username || 'Unknown'}
+              </Text>
+              <Text style={styles.subText}>
+                {distanceText || 'View Details'}
+              </Text>
+            </View>
           </View>
-        )}
-        <Text style={styles.username}>{username}</Text>
-      </View>
+          
+          <Text style={styles.amount}>{amount}</Text>
+        </View>
 
-      {/* Job Info */}
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.amount}>${amount}</Text>
+        <Text style={styles.title} numberOfLines={2}>{title}</Text>
+      </TouchableOpacity>
 
-      {/* Action Buttons */}
-      <View style={styles.actions}>
+      {/* 🟢 3. Footer Area (Action Buttons) */}
+      <View style={styles.footer}>
+        {isOwner ? (
+          <View style={styles.ownerActions}>
+            
+            {/* DELETE BUTTON (Left Side - Explicitly separated) */}
+            <TouchableOpacity 
+              onPress={() => {
+                console.log("🗑️ DELETE BUTTON PRESSED");
+                if (onDelete) {
+                    onDelete();
+                } else {
+                    console.log("❌ Error: onDelete prop is missing");
+                }
+              }} 
+              style={[styles.actionBtn, { marginRight: 15 }]} 
+              // Removed hitSlop to ensure no overlap
+            >
+              <View style={styles.deleteBtnInternal}>
+                 <FontAwesome name="trash" size={18} color="#FF3B30" />
+                 <Text style={styles.deleteText}>Delete</Text>
+              </View>
+            </TouchableOpacity>
 
-        {/* EDIT Button (Only for Owner) */}
-        {isOwner && onEdit && (
-          <TouchableOpacity
-            style={styles.editBtn}
-            onPress={(e) => {
-              e.stopPropagation();
-              onEdit();
-            }}
-          >
-            <FontAwesome name="pencil" size={16} color="white" style={{ marginRight: 5 }} />
-            <Text style={styles.btnText}>Edit</Text>
-          </TouchableOpacity>
-        )}
+            {/* EDIT BUTTON */}
+            <TouchableOpacity 
+              onPress={() => {
+                console.log("✏️ EDIT BUTTON PRESSED");
+                if (onEdit) onEdit();
+              }} 
+              style={styles.actionBtn}
+            >
+               <View style={styles.editBtnInternal}>
+                 <FontAwesome name="edit" size={18} color="#007AFF" />
+                 <Text style={styles.editText}>Edit</Text>
+              </View>
+            </TouchableOpacity>
 
-        {/* DELETE Button (Only for Owner) */}
-        {isOwner && onDelete && (
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <FontAwesome name="trash" size={16} color="white" style={{ marginRight: 5 }} />
-            <Text style={styles.btnText}>Delete</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* APPLY Button (Only for Non-Owners) */}
-        {!isOwner && onApply && (
-          <TouchableOpacity
-            style={[
-              styles.applyBtn,
-              applicationStatus === 'PENDING' ? styles.pendingBtn : {},
-              applicationStatus === 'ACCEPTED' ? styles.acceptedBtn : {},
-              applicationStatus === 'REJECTED' ? styles.rejectedBtn : {},
-            ]}
-            onPress={(e) => {
-              e.stopPropagation();
-              onApply();
-            }}
-            // Disable if ANYTHING is in status (PENDING, ACCEPTED, REJECTED, etc.)
-            disabled={!!applicationStatus}
-          >
-            <Text style={styles.btnText}>
-              {!applicationStatus && "Apply Now"}
-              {applicationStatus === 'PENDING' && "Pending ⏳"}
-              {applicationStatus === 'ACCEPTED' && "Accepted 🎉"}
-              {applicationStatus === 'REJECTED' && "Cruel World 💔"}
-            </Text>
-          </TouchableOpacity>
+          </View>
+        ) : (
+          renderApplyButton()
         )}
       </View>
     </View>
@@ -86,96 +132,74 @@ export default function JobCard({ title, amount, profile, onDelete, onEdit, onAp
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'white',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: 'white', 
+    borderRadius: 16, 
+    marginBottom: 16, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.05, 
+    shadowRadius: 8, 
     shadowOffset: { width: 0, height: 2 },
-    elevation: 2
+    elevation: 3,
+    overflow: 'hidden' // Keeps the ripple/touch effect contained
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingBottom: 8
+  contentArea: {
+    padding: 16,
+    paddingBottom: 8 // Less padding at bottom so footer sits closer
   },
-  avatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    marginRight: 10,
-    backgroundColor: '#eee'
-  },
-  placeholder: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#eee',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10
-  },
-  username: {
-    fontWeight: '600',
-    color: '#555',
-    fontSize: 14
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 5,
-    color: '#000'
-  },
-  amount: {
-    fontSize: 16,
-    color: '#34C759',
-    fontWeight: 'bold',
-    marginBottom: 15
-  },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10
-  },
-  deleteBtn: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    flexDirection: 'row',
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: { width: 42, height: 42, borderRadius: 21 },
+  avatarPlaceholder: { backgroundColor: '#CCC', justifyContent: 'center', alignItems: 'center' },
+  
+  username: { fontWeight: '700', fontSize: 14, color: '#1C1C1E' },
+  subText: { color: '#8E8E93', fontSize: 12, marginTop: 2 },
+  amount: { fontWeight: '700', fontSize: 16, color: '#34C759' }, 
+  title: { fontSize: 18, fontWeight: '700', color: '#000', marginBottom: 5, lineHeight: 24 },
+  
+  // Footer Container
+  footer: { 
+    paddingHorizontal: 16, 
+    paddingBottom: 16,
+    paddingTop: 0,
+    flexDirection: 'row', 
+    justifyContent: 'flex-end', 
     alignItems: 'center'
   },
-  editBtn: {
-    backgroundColor: '#FF9500', // Orange
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+  
+  // Owner Actions
+  ownerActions: { flexDirection: 'row' },
+  actionBtn: { padding: 0 },
+  
+  // Internal Button Styling
+  deleteBtnInternal: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#FFF5F5', 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
     borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center'
+    borderWidth: 1,
+    borderColor: '#FFEEEE'
   },
-  applyBtn: {
-    backgroundColor: '#007AFF', // Blue for default apply
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8
+  deleteText: { color: '#FF3B30', marginLeft: 6, fontWeight: '700', fontSize: 14 },
+
+  editBtnInternal: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#F0F5FF', 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EEF0FF'
   },
-  pendingBtn: {
-    backgroundColor: '#FF9500' // Orange for pending
-  },
-  acceptedBtn: {
-    backgroundColor: '#34C759' // Green for accepted
-  },
-  rejectedBtn: {
-    backgroundColor: '#FF3B30' // Red for rejected
-  },
-  btnText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14
-  }
+  editText: { color: '#007AFF', marginLeft: 6, fontWeight: '700', fontSize: 14 },
+
+  // Apply Button (Non-Owner)
+  applyBtn: { backgroundColor: '#007AFF', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10 },
+  applyBtnText: { color: 'white', fontWeight: '600', fontSize: 14 },
+
+  // Status Badges
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
+  statusText: { color: 'white', fontWeight: '700', fontSize: 12 }
 });

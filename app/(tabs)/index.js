@@ -1,147 +1,125 @@
-import { StyleSheet, View, FlatList, Text, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { supabase } from '../../supabase';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useFocusEffect, useRouter } from 'expo-router'; // Added useFocusEffect
+import { useCallback, useRef, useState } from 'react';
+import { Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import JobCard from '../../components/JobCard';
 import PostJobForm from '../../components/PostJobForm';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { supabase } from '../../supabase';
 
 export default function MyJobsScreen() {
   const router = useRouter();
+  const flatListRef = useRef(null);
+
   const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [session, setSession] = useState(null);
   const [editingJob, setEditingJob] = useState(null);
-  const flatListRef = useRef(null);
 
-  // 1. Initial Setup
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchMyJobs(session.user.id);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (!session) {
-        // Handle logout state if needed, though _layout usually handles redirect
-        setJobs([]);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // 2. Auto-refresh when screen comes into focus
+  // 1. Initial Auth Check & Auto-Refresh on Focus
   useFocusEffect(
     useCallback(() => {
-      if (session?.user?.id) fetchMyJobs(session.user.id);
-    }, [session])
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session);
+        if (session) fetchMyJobs(session.user.id);
+      });
+    }, [])
   );
 
+  // 2. Fetch Jobs
   async function fetchMyJobs(userId) {
     if (!userId) return;
-
     try {
-      // 1. We look for jobs belonging to the user.
-      // 2. We use a "Left Join" approach so jobs load even if the profile is missing.
       const { data, error } = await supabase
         .from('jobs')
-        .select(`
-          *,
-          profiles:user_id (
-            username,
-            full_name,
-            avatar_url
-          )
-        `)
+        .select(`*, profiles:user_id(username, full_name, avatar_url)`)
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error("Supabase Error:", error.message);
-        // Fallback fetch
-        if (error.code === 'PGRST200' || error.message.includes("relationship")) { // Common code for relationship errors
-          console.log("Attempting fallback fetch...");
-          const { data: fallbackData } = await supabase
-            .from('jobs')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false });
-          setJobs(fallbackData || []);
-          return;
-        }
-        throw error;
-      }
-
+      if (error) throw error;
       setJobs(data || []);
     } catch (error) {
       console.log("Fetch Error:", error.message);
-      // Optional: Alert.alert("Error fetching jobs", error.message);
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function handleSignOut() {
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: async () => {
-          const { error } = await supabase.auth.signOut();
-          if (error) Alert.alert("Error", error.message);
-          // Router redirect handled in _layout.js
-        }
+  // 3. Handle Refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (session) await fetchMyJobs(session.user.id);
+    setRefreshing(false);
+  };
+
+  // 4. ✅ ROBUST DELETE FUNCTION
+  async function deleteJob(jobId) {
+    console.log("🚀 Starting Delete for Job ID:", jobId);
+
+    // A. Optimistic Update: Remove from UI immediately
+    const previousJobs = [...jobs];
+    setJobs(current => current.filter(job => job.id !== jobId));
+
+    try {
+      // B. Delete the job directly
+      // (We rely on the SQL 'ON DELETE CASCADE' to handle applications)
+      const { error, count } = await supabase
+        .from('jobs')
+        .delete()
+        .eq('id', jobId)
+        .select(); // Required to get 'count'
+
+      if (error) {
+        throw error;
       }
-    ]);
+
+      // If count is 0, it means the database didn't find the item or RLS blocked it
+      if (count === 0) {
+        throw new Error("Database permission denied or Item not found.");
+      }
+
+      console.log("✅ Delete Successful on Server");
+      Alert.alert("Success", "Job post deleted.");
+
+    } catch (error) {
+      console.error("❌ Delete Failed:", error.message);
+      
+      // C. Rollback UI if failed
+      setJobs(previousJobs);
+      Alert.alert(
+        "Delete Failed", 
+        "Could not delete this job. \n\nTip: Ensure you have run the SQL fix in Supabase to allow deleting jobs with applications."
+      );
+    }
   }
 
   function confirmDelete(id) {
+    console.log("👉 Confirm Dialog Open for ID:", id);
     Alert.alert(
       "Delete Job",
-      "Are you sure you want to delete this job?",
+      "Are you sure? This will remove the job and all its applications.",
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteJob(id) }
+        { text: "Cancel", style: "cancel", onPress: () => console.log("❌ User Cancelled") },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: () => {
+            console.log("✅ User Confirmed Delete");
+            deleteJob(id);
+          } 
+        }
       ]
     );
   }
 
-  const [lastError, setLastError] = useState(null);
-
-  async function deleteJob(id) {
-    setLastError(null);
-    console.log("Attempting to delete job:", id);
-
-    // 1. Delete from Supabase
-    const { error } = await supabase.from('jobs').delete().eq('id', id);
-
-    if (error) {
-      console.error("Delete Error:", error);
-      Alert.alert("Delete Failed", `Error Code: ${error.code}\nMessage: ${error.message}\nDetails: ${JSON.stringify(error)}`);
-      setLastError(error.message);
-    } else {
-      console.log("Delete Success");
-
-      // 2. Optimistic Update
-      setJobs(current => current.filter(job => job.id !== id));
-
-      // 3. Verify with Server
-      if (session) fetchMyJobs(session.user.id);
-    }
-  }
-
   function handleEdit(job) {
     setEditingJob(job);
-    // Scroll to top to show form
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
-  async function onRefresh() {
-    setRefreshing(true);
-    if (session) await fetchMyJobs(session.user.id);
-    setRefreshing(false);
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.replace('/login');
   }
 
   return (
@@ -150,7 +128,7 @@ export default function MyJobsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerText}>My Jobs</Text>
         <View style={styles.headerIcons}>
-          <TouchableOpacity onPress={() => fetchMyJobs(session?.user?.id)} style={styles.iconBtn}>
+          <TouchableOpacity onPress={onRefresh} style={styles.iconBtn}>
             <FontAwesome name="refresh" size={20} color="#007AFF" />
           </TouchableOpacity>
           <TouchableOpacity onPress={handleSignOut} style={styles.iconBtn}>
@@ -159,21 +137,16 @@ export default function MyJobsScreen() {
         </View>
       </View>
 
-      {/* Debug Error Message */}
-      {lastError && (
-        <View style={{ backgroundColor: '#FFCCCC', padding: 10, margin: 10, borderRadius: 8 }}>
-          <Text style={{ color: 'red', fontWeight: 'bold' }}>Error: {lastError}</Text>
-        </View>
-      )}
-
+      {/* Main List */}
       <FlatList
         ref={flatListRef}
         data={jobs}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
-
-        // 1. THE INPUT FORM (Extracted Component)
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        
+        // Form is the Header
         ListHeaderComponent={
           <PostJobForm
             initialValues={editingJob}
@@ -185,34 +158,38 @@ export default function MyJobsScreen() {
           />
         }
 
-        // 2. RENDER JOB CARDS
+        // Render Cards
         renderItem={({ item }) => (
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => router.push({ pathname: "/job/[id]", params: { id: item.id } })}
-          >
+          <View style={{ paddingHorizontal: 15, marginBottom: 15 }}>
             <JobCard
               title={item.title}
               amount={item.amount}
               profile={item.profiles}
               isOwner={true}
-              onDelete={() => confirmDelete(item.id)}
+              
+              // ✅ 1. Navigation Logic
+              onPress={() => router.push({ pathname: "/job/[id]", params: { id: item.id } })}
+              
+              // ✅ 2. Delete Logic (With Debug Log)
+              onDelete={() => {
+                console.log("🗑️ Parent received DELETE request for:", item.id);
+                confirmDelete(item.id);
+              }}
+              
+              // ✅ 3. Edit Logic
               onEdit={() => handleEdit(item)}
             />
-          </TouchableOpacity>
+          </View>
         )}
 
-        // 3. EMPTY STATE
         ListEmptyComponent={
           !loading && (
             <View style={styles.emptyContainer}>
-              <FontAwesome name="folder-open-o" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>You haven't posted any jobs yet.</Text>
+              <FontAwesome name="folder-open-o" size={48} color="#CCC" />
+              <Text style={styles.emptyText}>No jobs posted yet.</Text>
             </View>
           )
         }
-
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#007AFF" />}
       />
     </View>
   );
@@ -234,7 +211,6 @@ const styles = StyleSheet.create({
   headerText: { fontSize: 28, fontWeight: '800', color: '#000' },
   headerIcons: { flexDirection: 'row', gap: 20 },
   iconBtn: { padding: 5 },
-
   emptyContainer: { alignItems: 'center', marginTop: 60, opacity: 0.8 },
   emptyText: { color: '#8E8E93', fontSize: 16, marginTop: 10 }
 });
