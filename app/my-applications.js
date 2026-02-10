@@ -1,34 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  FlatList, 
-  ActivityIndicator, 
-  TouchableOpacity, 
-  Linking, 
-  Alert, 
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useFocusEffect } from 'expo-router'; // 👈 IMPORT THIS
+import { useCallback, useRef, useState } from 'react'; // Added useCallback, useRef
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Linking,
   RefreshControl,
-  SafeAreaView 
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { supabase } from '../supabase';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 export default function MyApplicationsScreen() {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchApplications();
-  }, []);
+  // 1. Memory Leak Protection
+  const isMounted = useRef(true);
+
+  // 2. Auto-Refresh Logic
+  useFocusEffect(
+    useCallback(() => {
+      isMounted.current = true;
+      fetchApplications();
+
+      return () => {
+        isMounted.current = false; // Cleanup when screen loses focus
+      };
+    }, [])
+  );
 
   async function fetchApplications() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // Fetch applications with nested Job and Employer (Profile) data
+      // 💡 NOTE: Ensure your database has a Foreign Key named 'user_id' 
+      // in the 'jobs' table pointing to 'profiles'.
       const { data, error } = await supabase
         .from('applications')
         .select(`
@@ -48,12 +61,20 @@ export default function MyApplicationsScreen() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setApplications(data || []);
+
+      // Only update state if screen is still mounted
+      if (isMounted.current) {
+        setApplications(data || []);
+      }
     } catch (error) {
-      Alert.alert("Error fetching applications", error.message);
+      if (isMounted.current) {
+        Alert.alert("Error fetching applications", error.message);
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -62,18 +83,28 @@ export default function MyApplicationsScreen() {
       return Alert.alert("No Phone Number", "The employer hasn't provided a contact number.");
     }
 
-    // Clean phone number (remove spaces, dashes, etc.)
     const cleanPhone = phone.replace(/[^0-9+]/g, '');
-    const url = type === 'call' 
-      ? `tel:${cleanPhone}` 
-      : `https://wa.me/${cleanPhone.replace('+', '')}`;
+    
+    // 3. Improved URL Schemes
+    let url = '';
+    if (type === 'call') {
+      url = `tel:${cleanPhone}`;
+    } else {
+      // whatsapp:// is often more reliable on mobile than https://wa.me
+      url = `whatsapp://send?phone=${cleanPhone}`; 
+    }
 
     try {
       const supported = await Linking.canOpenURL(url);
       if (supported) {
         await Linking.openURL(url);
       } else {
-        Alert.alert("Error", "This action is not supported on your device.");
+        // Fallback for WhatsApp if app not installed
+        if (type === 'wa') {
+           await Linking.openURL(`https://wa.me/${cleanPhone.replace('+', '')}`);
+        } else {
+           Alert.alert("Error", "Action not supported on this device.");
+        }
       }
     } catch (error) {
       Alert.alert("Error", "Could not open the application.");
@@ -83,9 +114,11 @@ export default function MyApplicationsScreen() {
   const renderItem = ({ item }) => {
     const job = item.jobs;
     const employer = job?.profiles;
-    const isHired = item.status?.toUpperCase() === 'APPROVED' || item.status?.toUpperCase() === 'HIRED';
+    
+    // Normalize status check (Supabase sometimes returns lowercase)
+    const status = item.status?.toUpperCase();
+    const isHired = status === 'APPROVED' || status === 'HIRED';
 
-    // Handle case where a job might have been deleted
     if (!job) {
       return (
         <View style={[styles.card, { opacity: 0.6 }]}>
@@ -98,23 +131,29 @@ export default function MyApplicationsScreen() {
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.jobTitle}>{job.title}</Text>
-            <Text style={styles.amountText}>Proposed Pay: <Text style={{fontWeight: '700', color: '#34C759'}}>${job.amount}</Text></Text>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={styles.jobTitle} numberOfLines={1}>{job.title}</Text>
+            <Text style={styles.amountText}>
+              Proposed Pay: <Text style={styles.amountValue}>${job.amount}</Text>
+            </Text>
           </View>
           
           <View style={[styles.badge, isHired ? styles.bgSuccess : styles.bgPending]}>
             <Text style={styles.badgeText}>
-              {isHired ? "HIRED ✅" : item.status?.toUpperCase() || 'PENDING'}
+              {isHired ? "HIRED ✅" : status || 'PENDING'}
             </Text>
           </View>
         </View>
 
-        <Text style={styles.dateText}>Applied on: {new Date(item.created_at).toLocaleDateString()}</Text>
+        <Text style={styles.dateText}>
+          Applied on: {new Date(item.created_at).toLocaleDateString()}
+        </Text>
 
         {isHired && (
           <View style={styles.contactSection}>
-            <Text style={styles.contactLabel}>Contact {employer?.full_name || 'Employer'}:</Text>
+            <Text style={styles.contactLabel}>
+              Contact {employer?.full_name ? employer.full_name.split(' ')[0] : 'Employer'}:
+            </Text>
             <View style={styles.contactRow}>
               <TouchableOpacity 
                 style={styles.callBtn} 
@@ -202,11 +241,15 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   jobTitle: { fontSize: 18, fontWeight: '700', color: '#1C1C1E', marginBottom: 4 },
   amountText: { fontSize: 14, color: '#666' },
+  amountValue: { fontWeight: '700', color: '#34C759' },
   dateText: { fontSize: 12, color: '#A0A0A0', marginTop: 10 },
+  statusText: { color: '#888', marginTop: 5 },
+  
   badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   badgeText: { color: 'white', fontWeight: 'bold', fontSize: 10 },
   bgPending: { backgroundColor: '#FF9500' },
   bgSuccess: { backgroundColor: '#34C759' },
+  
   contactSection: {
     marginTop: 15,
     paddingTop: 15,

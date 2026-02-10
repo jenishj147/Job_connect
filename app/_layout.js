@@ -1,22 +1,31 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../supabase';
 
 export default function RootLayout() {
   const [session, setSession] = useState(null);
   const [initialized, setInitialized] = useState(false);
+  
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    // 1. Check for an existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setInitialized(true);
-    });
+    // 1. Initial Session Check
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+      } catch (error) {
+        console.error("Error checking session:", error);
+      } finally {
+        setInitialized(true);
+      }
+    };
 
-    // 2. Listen for login/logout changes
+    checkSession();
+
+    // 2. Real-time Auth Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setInitialized(true);
@@ -28,29 +37,23 @@ export default function RootLayout() {
   useEffect(() => {
     if (!initialized) return;
 
-    // Identify where the user is currently trying to go
-    const inTabsGroup = segments[0] === '(tabs)';
-    const inLogin = segments[0] === 'login';
-    const inJobDetails = segments[0] === 'job';
-    const inMyApps = segments[0] === 'my-applications';
+    // 🛡️ Safety: Handle case where segments might be undefined initially
+    const currentGroup = segments[0] || '';
+    
+    // Check if user is currently on an authentication screen
+    // (If you add a 'register' screen later, add it to this check)
+    const inAuthGroup = currentGroup === 'login';
 
-    if (session) {
-      // User IS logged in
-      // If they are on the login screen, redirect them to the Tabs
-      if (inLogin) {
-        router.replace('/(tabs)');
-      }
-      // Otherwise, let them stay where they are (Tabs, Job Details, or My Apps)
-    } else {
-      // User is NOT logged in
-      // If they are not on the login screen, force them to Login
-      if (!inLogin) {
-        router.replace('/login');
-      }
+    if (session && inAuthGroup) {
+      // ✅ Logged In: Redirect away from Login -> to Main Tabs
+      router.replace('/(tabs)');
+    } else if (!session && !inAuthGroup) {
+      // ⛔ Not Logged In: Redirect away from Protected Screens -> to Login
+      router.replace('/login');
     }
   }, [session, initialized, segments]);
 
-  // Show a spinner while we check if the user is logged in
+  // Loading Spinner (blocks rendering until we know who the user is)
   if (!initialized) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -61,17 +64,23 @@ export default function RootLayout() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {/* Main Tab Navigation */}
+      {/* Main App Group */}
       <Stack.Screen name="(tabs)" />
 
-      {/* Auth Screen */}
-      <Stack.Screen name="login" options={{ gestureEnabled: false }} />
+      {/* Auth Group */}
+      <Stack.Screen 
+        name="login" 
+        options={{ 
+          gestureEnabled: false, // Prevent swiping back to app
+          animation: 'fade'      // Nice fade effect for login
+        }} 
+      />
 
-      {/* Sub-Screens */}
+      {/* Detail Screens */}
       <Stack.Screen
         name="job/[id]"
         options={{
-          presentation: 'modal',
+          presentation: 'modal', // Makes it slide up like a sheet
           headerShown: false
         }}
       />
@@ -79,8 +88,8 @@ export default function RootLayout() {
       <Stack.Screen
         name="my-applications"
         options={{
-          presentation: 'card',
-          headerShown: false
+          presentation: 'card',  // Standard push navigation
+          headerShown: false     // We use the custom header inside the component
         }}
       />
     </Stack>

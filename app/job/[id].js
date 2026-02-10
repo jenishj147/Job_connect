@@ -1,10 +1,20 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
-// Ensure this path matches your project structure. 
-// If supabase.js is in the root, usage of '../../' is correct for 'app/job/[id].js'
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Platform // 👈 Import Platform
+  ,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
 import { supabase } from '../../supabase';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 export default function JobDetailsScreen() {
   const { id } = useLocalSearchParams();
@@ -33,7 +43,6 @@ export default function JobDetailsScreen() {
     if (jobData) setJob(jobData);
 
     // 2. Get Applicants
-    // We join with profiles to get the applicant's name and avatar
     const { data: appData, error: appError } = await supabase
       .from('applications')
       .select('*, profiles(username, full_name, avatar_url)')
@@ -45,69 +54,83 @@ export default function JobDetailsScreen() {
     setLoading(false);
   }
 
-  async function handleApprove(applicantId, applicationId) {
-    Alert.alert("Confirm Hire", "Hire this person? This will reject all other applicants.", [
-      { text: "Cancel" },
+  // 🟢 HELPER: The actual database logic
+  async function executeHire(applicantId, applicationId) {
+    setLoading(true);
+    try {
+      console.log("Starting Hire Process...");
+
+      // 1. Mark Job as ACCEPTED
+      const { error: jobErr } = await supabase
+        .from('jobs')
+        .update({ status: 'ACCEPTED', accepted_by: applicantId })
+        .eq('id', id);
+
+      if (jobErr) throw new Error("Failed to update job status: " + jobErr.message);
+
+      // 2. Mark this application as APPROVED
+      const { error: appErr } = await supabase
+        .from('applications')
+        .update({ status: 'APPROVED' })
+        .eq('id', applicationId);
+
+      if (appErr) throw new Error("Failed to approve application: " + appErr.message);
+
+      // 3. REJECT all other applications for this job
+      const { error: rejectErr } = await supabase
+        .from('applications')
+        .update({ status: 'REJECTED' })
+        .eq('job_id', id)
+        .neq('id', applicationId);
+
+      if (rejectErr) console.error("Reject Error (Non-critical):", rejectErr);
+
+      // Success Feedback
+      if (Platform.OS !== 'web') {
+          Alert.alert("Success", "Applicant hired!");
+      } else {
+          window.alert("Applicant hired successfully!");
+      }
+      
+      router.back();
+    } catch (error) {
+      console.error("Hire Process Failed:", error);
+      if (Platform.OS !== 'web') {
+          Alert.alert("Error", error.message);
+      } else {
+          window.alert("Error: " + error.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 🟢 HANDLER: Checks platform and asks for confirmation
+  function handleApprove(applicantId, applicationId) {
+    const title = "Hire this person?";
+    const msg = "This will reject all other applicants.";
+
+    // 1. WEB LOGIC
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title} ${msg}`)) {
+        executeHire(applicantId, applicationId);
+      }
+      return;
+    }
+
+    // 2. MOBILE LOGIC
+    Alert.alert("Confirm Hire", msg, [
+      { text: "Cancel", style: "cancel" },
       {
         text: "Yes, Hire",
-        onPress: async () => {
-          setLoading(true);
-          try {
-            console.log("Starting Hire Process...");
-
-            // 1. Mark Job as ACCEPTED
-            console.log("Updating Job Status...");
-            const { error: jobErr } = await supabase
-              .from('jobs')
-              .update({ status: 'ACCEPTED', accepted_by: applicantId })
-              .eq('id', id);
-
-            if (jobErr) {
-              console.error("Job Update Error:", jobErr);
-              throw new Error("Failed to update job status: " + jobErr.message);
-            }
-
-            // 2. Mark this application as APPROVED
-            console.log("Approving Application:", applicationId);
-            const { error: appErr } = await supabase
-              .from('applications')
-              .update({ status: 'APPROVED' })
-              .eq('id', applicationId);
-
-            if (appErr) {
-              console.error("App Update Error:", appErr);
-              throw new Error("Failed to approve application: " + appErr.message);
-            }
-
-            // 3. REJECT all other applications for this job
-            console.log("Rejecting other applications...");
-            const { error: rejectErr } = await supabase
-              .from('applications')
-              .update({ status: 'REJECTED' })
-              .eq('job_id', id)
-              .neq('id', applicationId);
-
-            if (rejectErr) {
-              console.error("Reject Error (Non-critical):", rejectErr);
-              // We don't throw here to avoid rolling back the success of the hire
-            }
-
-            Alert.alert("Success", "Applicant hired!");
-            router.back();
-          } catch (error) {
-            console.error("Hire Process Failed:", error);
-            Alert.alert("Error", error.message);
-          } finally {
-            setLoading(false);
-          }
-        }
+        onPress: () => executeHire(applicantId, applicationId)
       }
     ]);
   }
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
@@ -115,6 +138,7 @@ export default function JobDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* 🟢 Main Content */}
       <View style={styles.container}>
 
         {/* Header */}
@@ -125,23 +149,27 @@ export default function JobDetailsScreen() {
           <Text style={styles.headerTitle}>Review Applications</Text>
         </View>
 
-        {/* Job Card */}
-        <View style={styles.jobCard}>
-          <Text style={styles.jobTitle}>{job?.title || "Unknown Job"}</Text>
-          <Text style={styles.jobPrice}>{job?.amount ? `$${job.amount}` : "N/A"}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: job?.status === 'OPEN' ? '#e1f5fe' : '#e0e0e0' }]}>
-            <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
-              {job?.status || 'LOADING'}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
-
         <FlatList
           data={applicants}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingBottom: 50 }}
+          
+          // Job Info as Header of List (Scrolls with list)
+          ListHeaderComponent={
+            <>
+                <View style={styles.jobCard}>
+                <Text style={styles.jobTitle}>{job?.title || "Unknown Job"}</Text>
+                <Text style={styles.jobPrice}>{job?.amount ? `$${job.amount}` : "N/A"}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: job?.status === 'OPEN' ? '#e1f5fe' : '#e0e0e0' }]}>
+                    <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
+                    {job?.status || 'LOADING'}
+                    </Text>
+                </View>
+                </View>
+                <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
+            </>
+          }
+
           renderItem={({ item }) => {
             const user = item.profiles || {};
             const name = user.full_name || user.username || "Unknown";
@@ -187,6 +215,7 @@ export default function JobDetailsScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: 'white' },
   container: { flex: 1, backgroundColor: '#F2F2F7' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' },
   header: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
   backBtn: { marginRight: 15 },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },
