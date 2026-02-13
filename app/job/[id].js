@@ -6,8 +6,7 @@ import {
   Alert,
   FlatList,
   Image,
-  Platform // 👈 Import Platform
-  ,
+  Platform,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -19,10 +18,12 @@ import { supabase } from '../../supabase';
 export default function JobDetailsScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  
   const [job, setJob] = useState(null);
   const [applicants, setApplicants] = useState([]);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -30,33 +31,54 @@ export default function JobDetailsScreen() {
     });
 
     if (id) {
-      fetchData();
+        // 🟢 FIX: Call fetchData directly. Do NOT check isNaN.
+        fetchData(id);
     }
   }, [id]);
 
-  async function fetchData() {
-    console.log("Loading Job ID:", id);
+  async function fetchData(jobId) {
+    console.log("👉 Fetching Job ID:", jobId);
+    try {
+        // 1. Get Job Info
+        // 🟢 FIX: Removed parseInt() -> Sends ID exactly as is (works for UUID & Int)
+        const { data: jobData, error: jobError } = await supabase
+            .from('jobs')
+            .select('*')
+            .eq('id', jobId) 
+            .single();
+        
+        if (jobError) throw jobError;
+        setJob(jobData);
 
-    // 1. Get Job Info
-    const { data: jobData, error: jobError } = await supabase.from('jobs').select('*').eq('id', id).single();
-    if (jobError) console.log("Job Error:", jobError);
-    if (jobData) setJob(jobData);
+        // 2. Get Applicants
+        const { data: appData, error: appError } = await supabase
+            .from('applications')
+            .select('*, profiles(username, full_name, avatar_url)')
+            .eq('job_id', jobId); // 🟢 FIX: No parseInt
 
-    // 2. Get Applicants
-    const { data: appData, error: appError } = await supabase
-      .from('applications')
-      .select('*, profiles(username, full_name, avatar_url)')
-      .eq('job_id', id);
+        if (appError) console.log("App Error:", appError.message);
+        if (appData) setApplicants(appData);
 
-    if (appError) console.log("App Error:", appError);
-    if (appData) setApplicants(appData);
-
-    setLoading(false);
+    } catch (error) {
+        console.log("❌ Fetch Error:", error.message);
+        
+        // Graceful Error Handling
+        if (error.code === '22P02') {
+            // This specific error means "Database expected Int but got UUID" (or vice versa)
+            setErrorMsg("This job cannot be opened due to an ID format mismatch.");
+        } else {
+            setErrorMsg("Job not found.");
+        }
+    } finally {
+        setLoading(false);
+    }
   }
 
   // 🟢 HELPER: The actual database logic
   async function executeHire(applicantId, applicationId) {
+    if (!job) return;
     setLoading(true);
+    
     try {
       console.log("Starting Hire Process...");
 
@@ -64,7 +86,7 @@ export default function JobDetailsScreen() {
       const { error: jobErr } = await supabase
         .from('jobs')
         .update({ status: 'ACCEPTED', accepted_by: applicantId })
-        .eq('id', id);
+        .eq('id', id); // 🟢 FIX: No parseInt
 
       if (jobErr) throw new Error("Failed to update job status: " + jobErr.message);
 
@@ -80,12 +102,11 @@ export default function JobDetailsScreen() {
       const { error: rejectErr } = await supabase
         .from('applications')
         .update({ status: 'REJECTED' })
-        .eq('job_id', id)
+        .eq('job_id', id) // 🟢 FIX: No parseInt
         .neq('id', applicationId);
 
-      if (rejectErr) console.error("Reject Error (Non-critical):", rejectErr);
+      if (rejectErr) console.error("Reject Error:", rejectErr);
 
-      // Success Feedback
       if (Platform.OS !== 'web') {
           Alert.alert("Success", "Applicant hired!");
       } else {
@@ -105,12 +126,10 @@ export default function JobDetailsScreen() {
     }
   }
 
-  // 🟢 HANDLER: Checks platform and asks for confirmation
   function handleApprove(applicantId, applicationId) {
     const title = "Hire this person?";
     const msg = "This will reject all other applicants.";
 
-    // 1. WEB LOGIC
     if (Platform.OS === 'web') {
       if (window.confirm(`${title} ${msg}`)) {
         executeHire(applicantId, applicationId);
@@ -118,15 +137,16 @@ export default function JobDetailsScreen() {
       return;
     }
 
-    // 2. MOBILE LOGIC
     Alert.alert("Confirm Hire", msg, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Yes, Hire",
-        onPress: () => executeHire(applicantId, applicationId)
-      }
+      { text: "Yes, Hire", onPress: () => executeHire(applicantId, applicationId) }
     ]);
   }
+
+  const openChat = (targetUserId) => {
+    if (!targetUserId) return;
+    router.push({ pathname: "/chat/[id]", params: { id: targetUserId } });
+  };
 
   if (loading) {
     return (
@@ -136,9 +156,28 @@ export default function JobDetailsScreen() {
     );
   }
 
+  // 🟢 ERROR STATE (Shows clean message instead of crash)
+  if (!job || errorMsg) {
+    return (
+        <View style={styles.center}>
+            <FontAwesome name="exclamation-circle" size={40} color="#ccc" />
+            <Text style={{color: 'gray', marginTop: 10}}>{errorMsg || "Job information unavailable."}</Text>
+            
+            {/* Debug Info: Optional, helps you see what ID failed */}
+            <Text style={{fontSize: 10, color: '#eee', marginTop: 5}}>ID: {id}</Text>
+
+            <TouchableOpacity onPress={() => router.back()} style={{marginTop: 20}}>
+                <Text style={{color: '#007AFF', fontWeight: 'bold'}}>Go Back</Text>
+            </TouchableOpacity>
+        </View>
+    );
+  }
+
+  // 🟢 OWNER CHECK (Safe access with ?.)
+  const isOwner = session?.user?.id === job?.user_id;
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* 🟢 Main Content */}
       <View style={styles.container}>
 
         {/* Header */}
@@ -154,23 +193,36 @@ export default function JobDetailsScreen() {
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingBottom: 50 }}
           
-          // Job Info as Header of List (Scrolls with list)
           ListHeaderComponent={
             <>
                 <View style={styles.jobCard}>
-                <Text style={styles.jobTitle}>{job?.title || "Unknown Job"}</Text>
-                <Text style={styles.jobPrice}>{job?.amount ? `$${job.amount}` : "N/A"}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: job?.status === 'OPEN' ? '#e1f5fe' : '#e0e0e0' }]}>
-                    <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
-                    {job?.status || 'LOADING'}
-                    </Text>
+                    <Text style={styles.jobTitle}>{job?.title || "Unknown Job"}</Text>
+                    <Text style={styles.jobPrice}>{job?.amount ? `$${job.amount}` : "N/A"}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: job?.status === 'OPEN' ? '#e1f5fe' : '#e0e0e0' }]}>
+                        <Text style={{ color: job?.status === 'OPEN' ? '#0288d1' : '#616161', fontWeight: 'bold' }}>
+                        {job?.status || 'LOADING'}
+                        </Text>
+                    </View>
+
+                    {!isOwner && session && job?.user_id && (
+                        <TouchableOpacity 
+                            style={styles.chatOwnerButton} 
+                            onPress={() => openChat(job.user_id)}
+                        >
+                            <FontAwesome name="comments" size={16} color="white" style={{ marginRight: 8 }} />
+                            <Text style={styles.chatOwnerText}>Chat with Employer</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
-                </View>
-                <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
+                
+                {isOwner && (
+                    <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
+                )}
             </>
           }
 
           renderItem={({ item }) => {
+            if (!isOwner) return null;
             const user = item.profiles || {};
             const name = user.full_name || user.username || "Unknown";
 
@@ -182,7 +234,7 @@ export default function JobDetailsScreen() {
                   ) : (
                     <View style={styles.placeholder}><FontAwesome name="user" size={20} color="#666" /></View>
                   )}
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{name}</Text>
                     <Text style={[styles.date, {
                       color: item.status === 'APPROVED' ? 'green' : item.status === 'REJECTED' ? 'red' : '#888'
@@ -191,20 +243,35 @@ export default function JobDetailsScreen() {
                     </Text>
                   </View>
                 </View>
-
-                {/* Only show Hire button if job is OPEN, app is PENDING, AND current user is OWNER */}
-                {job?.status === 'OPEN' && item.status === 'PENDING' && session?.user?.id === job.user_id && (
-                  <TouchableOpacity style={styles.hireBtn} onPress={() => handleApprove(item.applicant_id, item.id)}>
-                    <Text style={styles.btnText}>Hire This Person</Text>
+                
+                <View style={styles.actionRow}>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, { backgroundColor: '#E1F5FE' }]} 
+                    onPress={() => openChat(item.applicant_id)}
+                  >
+                    <FontAwesome name="comment" size={16} color="#007AFF" style={{ marginRight: 8 }} />
+                    <Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Chat</Text>
                   </TouchableOpacity>
-                )}
+
+                  {job?.status === 'OPEN' && item.status === 'PENDING' && (
+                    <TouchableOpacity 
+                        style={[styles.actionBtn, { backgroundColor: '#34C759' }]} 
+                        onPress={() => handleApprove(item.applicant_id, item.id)}
+                    >
+                        <Text style={{ color: 'white', fontWeight: 'bold' }}>Hire</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
               </View>
             );
           }}
           ListEmptyComponent={
-            <Text style={{ textAlign: 'center', marginTop: 30, color: '#888' }}>
-              No applicants yet.
-            </Text>
+            isOwner ? (
+                <Text style={{ textAlign: 'center', marginTop: 30, color: '#888' }}>
+                No applicants yet.
+                </Text>
+            ) : null
           }
         />
       </View>
@@ -223,6 +290,8 @@ const styles = StyleSheet.create({
   jobTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 5 },
   jobPrice: { fontSize: 18, color: '#34C759', fontWeight: 'bold' },
   statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5, marginTop: 8 },
+  chatOwnerButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', marginTop: 15, paddingVertical: 12, borderRadius: 8 },
+  chatOwnerText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginLeft: 15, marginBottom: 10, color: '#555' },
   applicantCard: { backgroundColor: 'white', padding: 15, marginHorizontal: 15, marginBottom: 10, borderRadius: 10, elevation: 1 },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
@@ -230,6 +299,7 @@ const styles = StyleSheet.create({
   placeholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   name: { fontSize: 16, fontWeight: 'bold' },
   date: { fontSize: 13, marginTop: 2 },
-  hireBtn: { backgroundColor: '#007AFF', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  btnText: { color: 'white', fontWeight: 'bold' }
+  chatIconBtn: { padding: 10, backgroundColor: '#E1F5FE', borderRadius: 20, marginLeft: 10 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 5 },
+  actionBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 12, borderRadius: 8 }
 });
