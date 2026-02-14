@@ -6,7 +6,9 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
+        // 🛑 THIS LINE STOPS THE OVERLAP
+        headerShown: false, 
+        
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#8E8E93',
         tabBarStyle: {
@@ -15,10 +17,6 @@ export default function TabLayout() {
           paddingTop: 8,
           backgroundColor: 'white',
           borderTopColor: '#E5E5EA',
-        },
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
         },
       }}
     >
@@ -38,7 +36,6 @@ export default function TabLayout() {
         }} 
       />
 
-      {/* 🟢 NEW MESSAGES TAB ADDED HERE */}
       <Tabs.Screen 
         name="messages" 
         options={{ 
