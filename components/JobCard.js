@@ -5,201 +5,181 @@ export default function JobCard({
   title, 
   amount, 
   profile, 
+  onPress, 
   isOwner, 
   onDelete, 
   onEdit, 
-  onApply,
-  onPress, // Navigation action (Go to Details)
-  applicationStatus, // 'APPLIED', 'HIRED', 'PENDING'
-  distanceText // Optional: '5.4 km'
+  jobData,
+  distance // 🟢 NEW PROP
 }) {
-
-  // Helper to render the button based on status (for Non-Owners)
-  const renderApplyButton = () => {
-    const status = applicationStatus ? applicationStatus.toUpperCase() : null;
-
-    if (status === 'HIRED' || status === 'APPROVED') {
-        return (
-            <View style={[styles.statusBadge, { backgroundColor: '#34C759' }]}>
-                <FontAwesome name="check" size={14} color="white" />
-                <Text style={styles.statusText}>Hired</Text>
-            </View>
-        );
-    }
-    if (status === 'PENDING' || status === 'APPLIED') {
-        return (
-            <View style={[styles.statusBadge, { backgroundColor: '#FF9500' }]}>
-                <FontAwesome name="clock-o" size={14} color="white" />
-                <Text style={styles.statusText}>Applied</Text>
-            </View>
-        );
-    }
-    
-    // Default: Show Apply Button
-    return (
-        <TouchableOpacity style={styles.applyBtn} onPress={onApply}>
-            <Text style={styles.applyBtnText}>Apply Now</Text>
-        </TouchableOpacity>
-    );
-  };
+  
+  const dateStr = jobData?.created_at 
+    ? new Date(jobData.created_at).toLocaleDateString() 
+    : 'Recently';
 
   return (
-    // 🟢 1. Main Container is a VIEW (Not a Button) to prevent touch conflicts
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       
-      {/* 🟢 2. Top Content Area (Triggers Navigation) */}
-      <TouchableOpacity 
-        style={styles.contentArea} 
-        activeOpacity={0.7}
-        onPress={() => {
-          console.log("👉 Navigating to Job Details...");
-          if (onPress) onPress();
-        }}
-      >
-        <View style={styles.header}>
-          <View style={styles.userInfo}>
-            {/* Avatar Handling */}
+      {/* 🟢 1. Header Row */}
+      <View style={styles.headerRow}>
+        <View style={{flex: 1}}>
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            
+            {/* Location + Distance Row */}
+            <View style={styles.locationRow}>
+                
+                {/* 🟢 NEW: Distance Badge */}
+                {distance && (
+                    <View style={styles.distanceBadge}>
+                        <FontAwesome name="location-arrow" size={10} color="#007AFF" style={{marginRight: 4}} />
+                        <Text style={styles.distanceText}>{distance} km</Text>
+                    </View>
+                )}
+
+                {/* Location Text */}
+                {jobData?.location && (
+                    <View style={styles.textRow}>
+                        {distance && <Text style={styles.dot}>•</Text>}
+                        <Text style={styles.locationText} numberOfLines={1}>{jobData.location}</Text>
+                    </View>
+                )}
+            </View>
+        </View>
+        <Text style={styles.amount}>₹{amount}</Text>
+      </View>
+
+      {/* 🟢 2. Middle Section */}
+      {isOwner ? (
+        <View style={styles.metaRow}>
+            <View style={[styles.badge, { backgroundColor: jobData?.status === 'OPEN' ? '#E1F5FE' : '#F5F5F5' }]}>
+                <Text style={{ color: jobData?.status === 'OPEN' ? '#0288D1' : '#666', fontSize: 12, fontWeight: 'bold' }}>
+                    {jobData?.status || 'OPEN'}
+                </Text>
+            </View>
+            <Text style={styles.date}>{dateStr}</Text>
+        </View>
+      ) : (
+        <View style={styles.profileRow}>
             {profile?.avatar_url ? (
                 <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
             ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <FontAwesome name="user" size={20} color="#fff" />
+                <View style={styles.avatarPlaceholder}>
+                    <FontAwesome name="user" size={14} color="#666" />
                 </View>
             )}
-            
-            <View>
-              <Text style={styles.username}>
-                {profile?.full_name || profile?.username || 'Unknown'}
-              </Text>
-              <Text style={styles.subText}>
-                {distanceText || 'View Details'}
-              </Text>
-            </View>
-          </View>
-          
-          <Text style={styles.amount}>{amount}</Text>
+            <Text style={styles.employerName}>
+                {profile?.full_name || profile?.username || "Employer"}
+            </Text>
+            <Text style={styles.dot}>•</Text>
+            <Text style={styles.date}>{dateStr}</Text>
         </View>
+      )}
 
-        <Text style={styles.title} numberOfLines={2}>{title}</Text>
-      </TouchableOpacity>
-
-      {/* 🟢 3. Footer Area (Action Buttons) */}
-      <View style={styles.footer}>
-        {isOwner ? (
-          <View style={styles.ownerActions}>
+      {/* 🟢 3. Action Buttons (Owner Only) */}
+      {isOwner && (
+        <View style={styles.actionRow}>
+            <TouchableOpacity style={styles.editBtn} onPress={onEdit}>
+                <FontAwesome name="pencil" size={16} color="#007AFF" />
+                <Text style={styles.btnTextEdit}>Edit</Text>
+            </TouchableOpacity>
             
-            {/* DELETE BUTTON (Left Side - Explicitly separated) */}
-            <TouchableOpacity 
-              onPress={() => {
-                console.log("🗑️ DELETE BUTTON PRESSED");
-                if (onDelete) {
-                    onDelete();
-                } else {
-                    console.log("❌ Error: onDelete prop is missing");
-                }
-              }} 
-              style={[styles.actionBtn, { marginRight: 15 }]} 
-              // Removed hitSlop to ensure no overlap
-            >
-              <View style={styles.deleteBtnInternal}>
-                 <FontAwesome name="trash" size={18} color="#FF3B30" />
-                 <Text style={styles.deleteText}>Delete</Text>
-              </View>
+            <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
+                <FontAwesome name="trash" size={16} color="#FF3B30" />
+                <Text style={styles.btnTextDelete}>Delete</Text>
             </TouchableOpacity>
+        </View>
+      )}
 
-            {/* EDIT BUTTON */}
-            <TouchableOpacity 
-              onPress={() => {
-                console.log("✏️ EDIT BUTTON PRESSED");
-                if (onEdit) onEdit();
-              }} 
-              style={styles.actionBtn}
-            >
-               <View style={styles.editBtnInternal}>
-                 <FontAwesome name="edit" size={18} color="#007AFF" />
-                 <Text style={styles.editText}>Edit</Text>
-              </View>
-            </TouchableOpacity>
-
-          </View>
-        ) : (
-          renderApplyButton()
-        )}
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'white', 
-    borderRadius: 16, 
-    marginBottom: 16, 
-    shadowColor: '#000', 
-    shadowOpacity: 0.05, 
-    shadowRadius: 8, 
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: 'hidden' // Keeps the ripple/touch effect contained
-  },
-  contentArea: {
+    backgroundColor: 'white',
     padding: 16,
-    paddingBottom: 8 // Less padding at bottom so footer sits closer
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 2,
   },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 42, height: 42, borderRadius: 21 },
-  avatarPlaceholder: { backgroundColor: '#CCC', justifyContent: 'center', alignItems: 'center' },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  amount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#34C759',
+  },
   
-  username: { fontWeight: '700', fontSize: 14, color: '#1C1C1E' },
-  subText: { color: '#8E8E93', fontSize: 12, marginTop: 2 },
-  amount: { fontWeight: '700', fontSize: 16, color: '#34C759' }, 
-  title: { fontSize: 18, fontWeight: '700', color: '#000', marginBottom: 5, lineHeight: 24 },
-  
-  // Footer Container
-  footer: { 
-    paddingHorizontal: 16, 
-    paddingBottom: 16,
-    paddingTop: 0,
+  // Location & Distance
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    flexWrap: 'wrap'
+  },
+  distanceBadge: {
     flexDirection: 'row', 
-    justifyContent: 'flex-end', 
-    alignItems: 'center'
+    alignItems: 'center',
+    backgroundColor: '#E1F5FE', 
+    paddingHorizontal: 8, 
+    paddingVertical: 4,
+    borderRadius: 12, 
+    marginRight: 6
+  },
+  distanceText: { fontSize: 11, color: '#007AFF', fontWeight: 'bold' },
+  textRow: { flexDirection: 'row', alignItems: 'center' },
+  locationText: { fontSize: 14, color: '#888' },
+  
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 5,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   
-  // Owner Actions
-  ownerActions: { flexDirection: 'row' },
-  actionBtn: { padding: 0 },
-  
-  // Internal Button Styling
-  deleteBtnInternal: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#FFF5F5', 
-    paddingVertical: 8, 
-    paddingHorizontal: 12, 
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FFEEEE'
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 10,
   },
-  deleteText: { color: '#FF3B30', marginLeft: 6, fontWeight: '700', fontSize: 14 },
+  avatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8, backgroundColor: '#eee' },
+  avatarPlaceholder: { width: 24, height: 24, borderRadius: 12, marginRight: 8, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
+  employerName: { fontSize: 14, fontWeight: '600', color: '#555' },
+  dot: { marginHorizontal: 6, color: '#ccc' },
+  date: { fontSize: 12, color: '#999' },
 
-  editBtnInternal: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#F0F5FF', 
-    paddingVertical: 8, 
-    paddingHorizontal: 12, 
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#EEF0FF'
+  actionRow: {
+    flexDirection: 'row',
+    marginTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 10,
+    gap: 15,
   },
-  editText: { color: '#007AFF', marginLeft: 6, fontWeight: '700', fontSize: 14 },
-
-  // Apply Button (Non-Owner)
-  applyBtn: { backgroundColor: '#007AFF', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10 },
-  applyBtnText: { color: 'white', fontWeight: '600', fontSize: 14 },
-
-  // Status Badges
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
-  statusText: { color: 'white', fontWeight: '700', fontSize: 12 }
+  editBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, backgroundColor: '#F0F9FF', borderRadius: 8 },
+  deleteBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 8, backgroundColor: '#FFF0F0', borderRadius: 8 },
+  btnTextEdit: { color: '#007AFF', fontWeight: '600', marginLeft: 6 },
+  btnTextDelete: { color: '#FF3B30', fontWeight: '600', marginLeft: 6 },
 });

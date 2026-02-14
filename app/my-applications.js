@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useFocusEffect } from 'expo-router'; // 👈 IMPORT THIS
-import { useCallback, useRef, useState } from 'react'; // Added useCallback, useRef
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase'; // 👈 FIXED IMPORT PATH
 
 export default function MyApplicationsScreen() {
   const [applications, setApplications] = useState([]);
@@ -40,8 +40,7 @@ export default function MyApplicationsScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // 💡 NOTE: Ensure your database has a Foreign Key named 'user_id' 
-      // in the 'jobs' table pointing to 'profiles'.
+      // 3. Fetch Data
       const { data, error } = await supabase
         .from('applications')
         .select(`
@@ -51,18 +50,18 @@ export default function MyApplicationsScreen() {
           jobs (
             title, 
             amount,
-            profiles!user_id ( 
-              phone, 
-              full_name 
+            profiles:user_id ( 
+              full_name,
+              phone       
             )
           )
         `)
+        // ^^^ USING 'phone' (matches your DB)
         .eq('applicant_id', session.user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      // Only update state if screen is still mounted
       if (isMounted.current) {
         setApplications(data || []);
       }
@@ -80,26 +79,27 @@ export default function MyApplicationsScreen() {
 
   const handleContact = async (type, phone) => {
     if (!phone) {
-      return Alert.alert("No Phone Number", "The employer hasn't provided a contact number.");
+      return Alert.alert("Unavailable", "The employer hasn't provided a contact number.");
     }
 
+    // Clean the phone string (remove spaces, parentheses, dashes)
     const cleanPhone = phone.replace(/[^0-9+]/g, '');
     
-    // 3. Improved URL Schemes
     let url = '';
     if (type === 'call') {
       url = `tel:${cleanPhone}`;
     } else {
-      // whatsapp:// is often more reliable on mobile than https://wa.me
+      // WhatsApp Scheme
       url = `whatsapp://send?phone=${cleanPhone}`; 
     }
 
     try {
       const supported = await Linking.canOpenURL(url);
+      
       if (supported) {
         await Linking.openURL(url);
       } else {
-        // Fallback for WhatsApp if app not installed
+        // Fallback for WhatsApp if the app isn't installed
         if (type === 'wa') {
            await Linking.openURL(`https://wa.me/${cleanPhone.replace('+', '')}`);
         } else {
@@ -113,11 +113,14 @@ export default function MyApplicationsScreen() {
 
   const renderItem = ({ item }) => {
     const job = item.jobs;
-    const employer = job?.profiles;
+    const employer = job?.profiles; 
     
-    // Normalize status check (Supabase sometimes returns lowercase)
+    // 🟢 FIXED: Use 'phone' directly
+    const employerPhone = employer?.phone;
+
+    // 🟢 FIXED: Match status from previous screen ('ACCEPTED')
     const status = item.status?.toUpperCase();
-    const isHired = status === 'APPROVED' || status === 'HIRED';
+    const isHired = status === 'ACCEPTED' || status === 'HIRED';
 
     if (!job) {
       return (
@@ -130,11 +133,12 @@ export default function MyApplicationsScreen() {
 
     return (
       <View style={styles.card}>
+        {/* Header Section */}
         <View style={styles.cardHeader}>
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={styles.jobTitle} numberOfLines={1}>{job.title}</Text>
             <Text style={styles.amountText}>
-              Proposed Pay: <Text style={styles.amountValue}>${job.amount}</Text>
+              Pay: <Text style={styles.amountValue}>₹{job.amount}</Text>
             </Text>
           </View>
           
@@ -146,26 +150,30 @@ export default function MyApplicationsScreen() {
         </View>
 
         <Text style={styles.dateText}>
-          Applied on: {new Date(item.created_at).toLocaleDateString()}
+          Applied: {new Date(item.created_at).toLocaleDateString()}
         </Text>
 
+        {/* 🟢 CONDITIONAL RENDER: Contact Buttons */}
         {isHired && (
           <View style={styles.contactSection}>
             <Text style={styles.contactLabel}>
-              Contact {employer?.full_name ? employer.full_name.split(' ')[0] : 'Employer'}:
+              Contact {employer?.full_name || 'Employer'}:
             </Text>
+            
             <View style={styles.contactRow}>
+              {/* Call Button */}
               <TouchableOpacity 
                 style={styles.callBtn} 
-                onPress={() => handleContact('call', employer?.phone)}
+                onPress={() => handleContact('call', employerPhone)}
               >
                 <FontAwesome name="phone" size={16} color="white" />
                 <Text style={styles.btnText}>Call</Text>
               </TouchableOpacity>
 
+              {/* WhatsApp Button */}
               <TouchableOpacity 
                 style={styles.waBtn} 
-                onPress={() => handleContact('wa', employer?.phone)}
+                onPress={() => handleContact('wa', employerPhone)}
               >
                 <FontAwesome name="whatsapp" size={18} color="white" />
                 <Text style={styles.btnText}>WhatsApp</Text>

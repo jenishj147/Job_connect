@@ -4,8 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Platform // 👈 Import Platform
-  ,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -26,7 +25,7 @@ export default function MyJobsScreen() {
   const [session, setSession] = useState(null);
   const [editingJob, setEditingJob] = useState(null);
 
-  // 1. Initial Auth Check & Auto-Refresh on Focus
+  // 1. Check Auth & Load Jobs
   useFocusEffect(
     useCallback(() => {
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -36,13 +35,15 @@ export default function MyJobsScreen() {
     }, [])
   );
 
-  // 2. Fetch Jobs
+  // 2. Fetch Jobs (Simpler & Stronger)
   async function fetchMyJobs(userId) {
     if (!userId) return;
     try {
+      // 🟢 FIX: using simple select('*') guarantees we get the data
+      // We removed the complex join for now to ensure jobs show up
       const { data, error } = await supabase
         .from('jobs')
-        .select(`*, profiles:user_id(username, full_name, avatar_url)`)
+        .select('*') 
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
@@ -62,90 +63,44 @@ export default function MyJobsScreen() {
     setRefreshing(false);
   };
 
-  // 4. ✅ ROBUST DELETE FUNCTION
+  // 4. Delete Function
   async function deleteJob(jobId) {
-    console.log("🚀 Starting Delete for Job ID:", jobId);
-
-    // A. Optimistic Update: Remove from UI immediately
+    // Optimistic Update (Remove from screen immediately)
     const previousJobs = [...jobs];
     setJobs(current => current.filter(job => job.id !== jobId));
 
     try {
-      // B. Delete the job directly
-      const { error, count } = await supabase
+      const { error } = await supabase
         .from('jobs')
         .delete()
-        .eq('id', jobId)
-        .select();
+        .eq('id', jobId);
 
       if (error) throw error;
 
-      if (count === 0) {
-        throw new Error("Database permission denied or Item not found.");
-      }
-
-      console.log("✅ Delete Successful on Server");
-      
-      // Only show success alert on mobile to avoid blocking flow
       if (Platform.OS !== 'web') {
-        Alert.alert("Success", "Job post deleted.");
+        Alert.alert("Success", "Job deleted.");
       }
-
     } catch (error) {
-      console.error("❌ Delete Failed:", error.message);
-      
-      // C. Rollback UI if failed
+      console.error("Delete Failed:", error.message);
+      // Put it back if failed
       setJobs(previousJobs);
-      Alert.alert(
-        "Delete Failed", 
-        "Could not delete this job. Ensure you have internet connection."
-      );
+      Alert.alert("Error", "Could not delete job.");
     }
   }
 
-  // 5. ✅ WEB-COMPATIBLE CONFIRMATION
   function confirmDelete(id) {
-    console.log("👉 Confirm Dialog Open for ID:", id);
-
-    // 🌐 WEB: Use browser native confirm
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm("Are you sure you want to delete this job? This cannot be undone.");
-      if (confirmed) {
-        deleteJob(id);
-      }
+      if (window.confirm("Delete this job?")) deleteJob(id);
       return;
     }
-
-    // 📱 MOBILE: Use Native Alert
-    Alert.alert(
-      "Delete Job",
-      "Are you sure? This will remove the job and all its applications.",
-      [
-        { text: "Cancel", style: "cancel", onPress: () => console.log("❌ User Cancelled") },
-        { 
-          text: "Delete", 
-          style: "destructive", 
-          onPress: () => {
-            console.log("✅ User Confirmed Delete");
-            deleteJob(id);
-          } 
-        }
-      ]
-    );
+    Alert.alert("Delete Job", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => deleteJob(id) }
+    ]);
   }
 
-  function handleEdit(job) {
-    setEditingJob(job);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-  }
-
+  // 5. Sign Out
   async function handleSignOut() {
-    // 🌐 WEB: Confirm logout on web too
-    if (Platform.OS === 'web') {
-        const confirmed = window.confirm("Are you sure you want to sign out?");
-        if (!confirmed) return;
-    }
-    
     await supabase.auth.signOut();
     router.replace('/login');
   }
@@ -174,7 +129,7 @@ export default function MyJobsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         
-        // Form is the Header
+        // The "Post Job" Form sits at the top
         ListHeaderComponent={
           <PostJobForm
             initialValues={editingJob}
@@ -186,26 +141,23 @@ export default function MyJobsScreen() {
           />
         }
 
-        // Render Cards
         renderItem={({ item }) => (
           <View style={{ paddingHorizontal: 15, marginBottom: 15 }}>
             <JobCard
               title={item.title}
               amount={item.amount}
-              profile={item.profiles}
+              // Pass the raw job data so JobCard can use it if needed
+              jobData={item} 
               isOwner={true}
               
-              // ✅ 1. Navigation Logic
               onPress={() => router.push({ pathname: "/job/[id]", params: { id: item.id } })}
               
-              // ✅ 2. Delete Logic
-              onDelete={() => {
-                console.log("🗑️ Parent received DELETE request for:", item.id);
-                confirmDelete(item.id);
-              }}
+              onDelete={() => confirmDelete(item.id)}
               
-              // ✅ 3. Edit Logic
-              onEdit={() => handleEdit(item)}
+              onEdit={() => {
+                setEditingJob(item);
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+              }}
             />
           </View>
         )}
