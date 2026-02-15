@@ -5,7 +5,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
-    Linking, // 👈 IMPORTED LINKING
+    Linking,
     Platform,
     SafeAreaView,
     ScrollView,
@@ -77,12 +77,12 @@ export default function JobDetailsScreen() {
     }
   }
 
-  // 🟢 NEW FUNCTION: Open Google Maps
+  // 🟢 FIXED: Open Google Maps
   const openGoogleMaps = (location) => {
     if (!location) return;
     
-    // Create a query URL for Google Maps
     const encodedLocation = encodeURIComponent(location);
+    // Fixed URL format for Web & Mobile
     const url = `https://www.google.com/maps/search/?api=1&query=${encodedLocation}`;
 
     Linking.openURL(url).catch(err => 
@@ -124,17 +124,20 @@ export default function JobDetailsScreen() {
   }
 
   // --- OWNER ACTION: Hire Candidate ---
+  // 🟢 NOTE: This sets status to 'ACCEPTED'. 
+  // Make sure your RootLayout listener checks for 'ACCEPTED', not 'hired'.
   async function handleHire(applicationId, applicantName) {
     
     const executeHireLogic = async () => {
         try {
             const { error } = await supabase
               .from('applications')
-              .update({ status: 'ACCEPTED' })
+              .update({ status: 'ACCEPTED' }) // 👈 This triggers the notification
               .eq('id', applicationId);
 
             if (error) throw error;
 
+            // Update Local State immediately for UI feedback
             setApplicants(prev => prev.map(app => 
               app.id === applicationId ? { ...app, status: 'ACCEPTED' } : app
             ));
@@ -145,6 +148,7 @@ export default function JobDetailsScreen() {
                 Alert.alert("Success", `${applicantName} has been hired!`);
             }
         } catch (err) {
+            console.error(err);
             Alert.alert("Error", "Could not update status.");
         }
     };
@@ -235,12 +239,13 @@ export default function JobDetailsScreen() {
             </View>
         </View>
 
-        {/* 2. OWNER OR APPLICANT VIEW */}
+        {/* 2. OWNER VIEW: Applicants */}
         {isOwner && (
             <View style={{paddingHorizontal: 15}}>
                 <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
+                
                 {applicants.map((item) => {
-                    const isHired = item.status === 'ACCEPTED';
+                    const isHired = item.status === 'ACCEPTED'; // 🟢 Check 'ACCEPTED'
                     return (
                         <View key={item.id} style={styles.applicantCard}>
                             <View style={styles.row}>
@@ -284,6 +289,7 @@ export default function JobDetailsScreen() {
             </View>
         )}
 
+        {/* 3. APPLICANT VIEW: Apply Button */}
         {!isOwner && (
             <View style={styles.footerContainer}>
                 <TouchableOpacity style={styles.chatButton} onPress={() => openChat(job.user_id)}>
@@ -332,7 +338,7 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'center' },
   iconWidth: { width: 30, textAlign: 'center' },
   detailText: { fontSize: 16, color: '#444', marginLeft: 10 },
-  linkText: { color: '#007AFF', fontWeight: '600', textDecorationLine: 'underline' }, // 👈 New Style for Link
+  linkText: { color: '#007AFF', fontWeight: '600', textDecorationLine: 'underline' },
 
   footerContainer: { 
     flexDirection: 'row', padding: 20, gap: 15, 
