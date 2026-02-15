@@ -10,8 +10,8 @@ export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
 
+  // 1. Monitor Auth State
   useEffect(() => {
-    // 1. Initial Session Check
     const checkSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -25,35 +25,46 @@ export default function RootLayout() {
 
     checkSession();
 
-    // 2. Real-time Auth Listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // 🟢 CHANGED: Remove the underscore from 'event' so we can use it
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
       setInitialized(true);
+
+      // 🟢 ADDED: Catch the password recovery event explicitly
+      if (event === 'PASSWORD_RECOVERY') {
+        // Force navigation to update-password, ignoring other logic
+        router.replace('/update-password');
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
+  // 2. Handle Protected vs Public Routing
   useEffect(() => {
     if (!initialized) return;
 
-    // 🛡️ Safety: Handle case where segments might be undefined initially
     const currentGroup = segments[0] || '';
     
-    // Check if user is currently on an authentication screen
-    // (If you add a 'register' screen later, add it to this check)
-    const inAuthGroup = currentGroup === 'login';
+    // Define all screens that don't require login
+    const publicScreens = ['login', 'signup', 'forgot-password', 'update-password'];
+    const inPublicGroup = publicScreens.includes(currentGroup);
 
-    if (session && inAuthGroup) {
-      // ✅ Logged In: Redirect away from Login -> to Main Tabs
+    // 🟢 KEEP THIS: It stops the auto-redirect if we are already on the update page
+    if (currentGroup === 'update-password') {
+      return; 
+    }
+
+    if (session && inPublicGroup) {
+      // If logged in and on a login/reset screen, go to home
       router.replace('/(tabs)');
-    } else if (!session && !inAuthGroup) {
-      // ⛔ Not Logged In: Redirect away from Protected Screens -> to Login
+    } else if (!session && !inPublicGroup) {
+      // If not logged in and on a protected screen, go to login
       router.replace('/login');
     }
   }, [session, initialized, segments]);
 
-  // Loading Spinner (blocks rendering until we know who the user is)
+  // Loading Screen
   if (!initialized) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -64,33 +75,26 @@ export default function RootLayout() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {/* Main App Group */}
       <Stack.Screen name="(tabs)" />
-
-      {/* Auth Group */}
       <Stack.Screen 
         name="login" 
-        options={{ 
-          gestureEnabled: false, // Prevent swiping back to app
-          animation: 'fade'      // Nice fade effect for login
-        }} 
+        options={{ gestureEnabled: false, animation: 'fade' }} 
       />
-
-      {/* Detail Screens */}
+      <Stack.Screen 
+        name="forgot-password" 
+        options={{ presentation: 'modal' }} 
+      />
+      <Stack.Screen 
+        name="update-password" 
+        options={{ gestureEnabled: false }} 
+      />
       <Stack.Screen
         name="job/[id]"
-        options={{
-          presentation: 'modal', // Makes it slide up like a sheet
-          headerShown: false
-        }}
+        options={{ presentation: 'modal' }}
       />
-
       <Stack.Screen
         name="my-applications"
-        options={{
-          presentation: 'card',  // Standard push navigation
-          headerShown: false     // We use the custom header inside the component
-        }}
+        options={{ presentation: 'card' }}
       />
     </Stack>
   );
