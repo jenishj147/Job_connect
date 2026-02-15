@@ -1,4 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons'; // 👈 Import for Trophy Icon
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -8,12 +9,13 @@ export default function NotificationToast({ message, visible, onHide }) {
   const slideAnim = useRef(new Animated.Value(-150)).current; 
   const timerRef = useRef(null);
 
+  // 🟢 Check if this is a HIRE notification
+  const isHire = message?.type === 'hire';
+
   useEffect(() => {
     if (visible) {
-      // 1. Reset Timer if a new message arrives while already open
       if (timerRef.current) clearTimeout(timerRef.current);
 
-      // 2. Play Entrance Animation
       Animated.spring(slideAnim, {
         toValue: 0, 
         useNativeDriver: Platform.OS !== 'web', 
@@ -21,17 +23,18 @@ export default function NotificationToast({ message, visible, onHide }) {
         bounciness: 8,
       }).start();
 
-      // 3. Set Auto-Hide Timer
+      // Keep "Hire" notifications visible longer (5s) than messages (4s)
+      const duration = isHire ? 5000 : 4000;
+
       timerRef.current = setTimeout(() => {
         hideToast();
-      }, 4000);
+      }, duration);
     }
 
-    // Cleanup function
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [visible, message]); // <--- 🟢 ADDED 'message' to reset timer on new chats
+  }, [visible, message]); 
 
   const hideToast = () => {
     Animated.timing(slideAnim, {
@@ -45,7 +48,11 @@ export default function NotificationToast({ message, visible, onHide }) {
 
   const handlePress = () => {
     hideToast();
-    if (message?.conversation_id) {
+    
+    // 🟢 Redirect Logic based on Type
+    if (isHire) {
+       router.push('/my-applications');
+    } else if (message?.conversation_id) {
        router.push(`/chat/${message.conversation_id}`);
     } else {
        router.push('/(tabs)/messages');
@@ -54,21 +61,30 @@ export default function NotificationToast({ message, visible, onHide }) {
 
   if (!visible) return null;
 
+  // 🟢 Dynamic Styles based on Type
+  const backgroundColor = isHire ? '#10B981' : '#333'; // Green for Hire, Dark for Message
+
   return (
     <Animated.View style={[
       styles.toast, 
-      { transform: [{ translateY: slideAnim }] }
+      { backgroundColor, transform: [{ translateY: slideAnim }] }
     ]}>
       <TouchableOpacity onPress={handlePress} style={styles.content}>
-        <FontAwesome name="user-circle" size={24} color="#fff" style={styles.icon} />
+        
+        {/* 🟢 Dynamic Icon */}
+        {isHire ? (
+           <MaterialIcons name="emoji-events" size={28} color="#fff" style={styles.icon} />
+        ) : (
+           <FontAwesome name="user-circle" size={24} color="#fff" style={styles.icon} />
+        )}
         
         <View style={styles.textContainer}>
           <Text style={styles.title}>
-            {message?.senderName || "New Message"}
+            {message?.senderName || "New Notification"}
           </Text>
           
-          <Text style={styles.message} numberOfLines={1}>
-            {message?.content || "Sent you a message"}
+          <Text style={styles.message} numberOfLines={2}>
+            {message?.content || "You have a new update"}
           </Text>
         </View>
       </TouchableOpacity>
@@ -78,16 +94,15 @@ export default function NotificationToast({ message, visible, onHide }) {
 
 const styles = StyleSheet.create({
   toast: {
-    backgroundColor: '#333',
+    // Background color is handled dynamically in style prop
     borderRadius: 12,
     zIndex: 9999,
-    elevation: 10, // Android shadow
-    shadowColor: "#000", // iOS shadow
+    elevation: 10, 
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     
-    // 🟢 FIXED: "fixed" is invalid in React Native. Use "absolute".
     position: 'absolute', 
     left: 20,
     right: 20,
@@ -98,11 +113,10 @@ const styles = StyleSheet.create({
         left: '50%', 
         marginLeft: -175, 
         width: 350, 
-        // Note: boxShadow is valid in RN-Web, but standard RN uses shadowColor above
         boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.3)', 
       },
       default: {
-        top: 50, // Mobile top margin (safe area usually)
+        top: 50, 
       }
     }),
   },
@@ -113,6 +127,6 @@ const styles = StyleSheet.create({
   },
   icon: { marginRight: 15 },
   textContainer: { flex: 1 },
-  title: { color: '#fff', fontWeight: 'bold', fontSize: 15, marginBottom: 2 },
-  message: { color: '#ddd', fontSize: 13 },
+  title: { color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 2 },
+  message: { color: '#f0f0f0', fontSize: 13 },
 });

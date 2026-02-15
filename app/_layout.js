@@ -30,7 +30,6 @@ export default function RootLayout() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
-      // Ensure initialized is true on auth change to prevent stuck loading screens
       setInitialized(true); 
       if (event === 'PASSWORD_RECOVERY') {
         router.replace('/update-password');
@@ -57,14 +56,18 @@ export default function RootLayout() {
     }
   }, [session, initialized, segments]);
 
-  // 3. NOTIFICATION LOGIC
+  // 🟢 3. NOTIFICATION LOGIC (Messages AND Hired Status)
   useEffect(() => {
+    // Only run if we have a valid User ID
     if (!session?.user?.id) return;
 
-    console.log("Subscribing to messages for user:", session.user.id);
+    const myId = session.user.id;
+    console.log("Subscribing to notifications for user:", myId);
 
     const channel = supabase
-      .channel('public:messages') 
+      .channel('public:notifications') 
+      
+      // --- LISTENER A: NEW MESSAGES ---
       .on(
         'postgres_changes',
         {
@@ -74,11 +77,10 @@ export default function RootLayout() {
         },
         async (payload) => {
           const messageData = payload.new;
-          const myId = session.user.id;
 
           // Check if message is for ME and NOT from ME
           if (messageData.receiver_id === myId && messageData.sender_id !== myId) {
-             
+              
              // Fetch Sender Name
              const { data: senderProfile, error } = await supabase
                .from('profiles')
@@ -86,19 +88,51 @@ export default function RootLayout() {
                .eq('id', messageData.sender_id)
                .single();
              
-             if (error) {
-                console.log("Error fetching sender name:", error.message);
-             }
-
              const senderName = senderProfile?.username || "New Message";
 
              setNewMessage({ 
                ...messageData, 
+               type: 'message', // 👈 Standard message type
                senderName: senderName 
              });
              
-             // 🟢 Trick to force re-render if toast is already open (Optional, 
-             // but 'message' dependency in Toast useEffect handles most of this)
+             setShowToast(true);
+          }
+        }
+      )
+
+      // --- LISTENER B: JOB APPLICATIONS (HIRED) ---
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'applications',
+        },
+        async (payload) => {
+          const newData = payload.new;
+
+          // Check if:
+          // 1. I am the applicant
+          // 2. The status changed to 'ACCEPTED' (Must match JobDetailsScreen logic)
+          if (newData.applicant_id === myId && newData.status === 'ACCEPTED') {
+             
+             // Fetch Job Details for the notification text
+             const { data: jobData } = await supabase
+               .from('jobs')
+               .select('title')
+               .eq('id', newData.job_id)
+               .single();
+
+             const jobTitle = jobData?.title || "a job";
+
+             setNewMessage({
+               type: 'hire', // 👈 Special 'hire' type triggers Green Toast & Trophy Icon
+               senderName: "Congratulations! 🎉",
+               content: `You have been hired for ${jobTitle}`,
+               conversation_id: null // Clicking redirects to 'my-applications'
+             });
+
              setShowToast(true);
           }
         }
@@ -106,10 +140,12 @@ export default function RootLayout() {
       .subscribe();
 
     return () => {
+      console.log("Unsubscribing from notifications...");
       supabase.removeChannel(channel);
     };
     
   }, [session?.user?.id]); 
+
 
   if (!initialized) {
     return (
