@@ -1,9 +1,11 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView } from 'react-native';
-import { useState } from 'react';
-import { supabase } from '../supabase';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useRouter } from 'expo-router'; // 👈 1. IMPORT ROUTER
+import { useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../supabase';
 
 export default function Auth() {
+  const router = useRouter(); // 👈 2. INIT ROUTER
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -77,6 +79,16 @@ export default function Auth() {
               onChangeText={setPassword}
             />
           </View>
+
+          {/* 🟢 3. FORGOT PASSWORD LINK (Only show in Login mode) */}
+          {isLogin && (
+            <TouchableOpacity 
+              onPress={() => router.push('/forgot-password')} 
+              style={styles.forgotBtn}
+            >
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.primaryButton, loading && styles.disabledButton]}
@@ -167,12 +179,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1C1C1E'
   },
+  // 🟢 4. NEW STYLES FOR FORGOT LINK
+  forgotBtn: {
+    alignSelf: 'flex-end',
+    marginBottom: 20,
+    marginTop: -5,
+  },
+  forgotText: {
+    color: '#007AFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
   primaryButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 5,
     shadowColor: '#007AFF',
     shadowOpacity: 0.3,
     shadowRadius: 8,
