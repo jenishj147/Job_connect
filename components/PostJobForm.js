@@ -1,12 +1,18 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Location from 'expo-location'; // 🟢 1. IMPORT LOCATION
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Modal,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
-  Text, TextInput, TouchableOpacity,
+  Text,
+  TextInput,
+  TouchableOpacity,
   View
 } from 'react-native';
 import { supabase } from '../supabase';
@@ -18,25 +24,31 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
   // Form Fields
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [location, setLocation] = useState(''); 
+  const [location, setLocation] = useState('');
   
   // Date State
-  const [jobDate, setJobDate] = useState('');        
   const [dateObject, setDateObject] = useState(new Date()); 
+  const [displayDate, setDisplayDate] = useState('');       
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  const [startTime, setStartTime] = useState(''); 
-  const [endTime, setEndTime] = useState('');     
-  const [hasFood, setHasFood] = useState(false);  
-  const [dressCode, setDressCode] = useState('Casual'); 
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [hasFood, setHasFood] = useState(false);
+  const [dressCode, setDressCode] = useState('Casual');
 
   // Handle Edit Mode
   useEffect(() => {
     if (initialValues) {
-      setTitle(initialValues.title);
+      setTitle(initialValues.title || '');
       setAmount(initialValues.amount ? initialValues.amount.toString() : '');
       setLocation(initialValues.location || '');
-      setJobDate(initialValues.job_date || '');   
+      
+      if (initialValues.job_date) {
+         const d = new Date(initialValues.job_date);
+         setDateObject(d);
+         setDisplayDate(d.toDateString());
+      }
+
       setStartTime(initialValues.shift_start || '');
       setEndTime(initialValues.shift_end || '');
       setHasFood(initialValues.has_food || false);
@@ -45,74 +57,116 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
     }
   }, [initialValues]);
 
-  // Handle Date Change (Mobile Only)
+  const formatDateForDB = (date) => {
+     return date.toISOString().split('T')[0];
+  };
+
   const onDateChange = (event, selectedDate) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
     }
     if (selectedDate) {
       setDateObject(selectedDate);
-      setJobDate(selectedDate.toDateString()); // e.g. "Fri Oct 13 2023"
+      setDisplayDate(selectedDate.toDateString());
     }
   };
 
+  // 🟢 2. GEOCODING FUNCTION
+  async function getCoordinates(address) {
+    try {
+      // Check/Request Permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Permission to access location was denied');
+        return { lat: null, long: null };
+      }
+
+      // Convert Address to Coordinates
+      let geocodedLocation = await Location.geocodeAsync(address);
+      
+      if (geocodedLocation.length > 0) {
+        return { 
+            lat: geocodedLocation[0].latitude, 
+            long: geocodedLocation[0].longitude 
+        };
+      }
+    } catch (error) {
+      console.log("Geocoding Error:", error);
+    }
+    return { lat: null, long: null };
+  }
+
   async function handleSubmit() {
-    if (!title || !amount || !location || !jobDate || !startTime) {
-      Alert.alert("Missing Info", "Please fill in Title, Amount, Location, Date, and Timing.");
+    if (!title || !amount || !location || !displayDate || !startTime) {
+      Alert.alert("Missing Info", "Please fill in Title, Amount, Location, Date, and Start Time.");
       return;
     }
 
     setLoading(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
+    
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
 
-    if (!user) {
-      Alert.alert("Error", "Please log in first.");
-      setLoading(false);
-      return;
-    }
+        if (!user) {
+            Alert.alert("Error", "Please log in first.");
+            setLoading(false);
+            return;
+        }
 
-    const jobData = {
-      title,
-      amount: parseInt(amount),
-      user_id: user.id,
-      location,
-      job_date: jobDate,      
-      shift_start: startTime, 
-      shift_end: endTime,     
-      has_food: hasFood,      
-      dress_code: dressCode   
-    };
+        // 🟢 3. GET COORDINATES BEFORE SAVING
+        const { lat, long } = await getCoordinates(location);
 
-    let error;
+        // Debug Log
+        console.log(`Geocoded '${location}':`, lat, long);
 
-    if (initialValues) {
-      const { error: updateErr } = await supabase
-        .from('jobs')
-        .update(jobData)
-        .eq('id', initialValues.id);
-      error = updateErr;
-    } else {
-      const { error: insertErr } = await supabase
-        .from('jobs')
-        .insert(jobData);
-      error = insertErr;
-    }
+        const jobData = {
+            title,
+            amount: parseInt(amount) || 0,
+            user_id: user.id,
+            location, // Text address
+            latitude: lat, // 🟢 Save Latitude
+            longitude: long, // 🟢 Save Longitude
+            job_date: formatDateForDB(dateObject),
+            shift_start: startTime,
+            shift_end: endTime,
+            has_food: hasFood,
+            dress_code: dressCode,
+            status: 'OPEN'
+        };
 
-    setLoading(false);
+        let error;
 
-    if (error) {
-      Alert.alert("Error", error.message);
-    } else {
-      setModalVisible(false);
-      resetForm();
-      if (onJobPosted) onJobPosted();
+        if (initialValues?.id) {
+            const { error: updateErr } = await supabase
+                .from('jobs')
+                .update(jobData)
+                .eq('id', initialValues.id);
+            error = updateErr;
+        } else {
+            const { error: insertErr } = await supabase
+                .from('jobs')
+                .insert(jobData);
+            error = insertErr;
+        }
+
+        if (error) throw error;
+
+        setModalVisible(false);
+        resetForm();
+        if (onJobPosted) onJobPosted();
+
+    } catch (error) {
+        Alert.alert("Error", error.message);
+    } finally {
+        setLoading(false);
     }
   }
 
   function resetForm() {
-    setTitle(''); setAmount(''); setLocation(''); setJobDate('');
-    setStartTime(''); setEndTime(''); 
+    setTitle(''); setAmount(''); setLocation(''); setDisplayDate('');
+    setStartTime(''); setEndTime('');
+    setDateObject(new Date());
     setHasFood(false); setDressCode('Casual');
     if (onCancelEdit) onCancelEdit();
   }
@@ -126,18 +180,27 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
         </TouchableOpacity>
       )}
 
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <Modal 
+        animationType="slide" 
+        transparent={true} 
+        visible={modalVisible} 
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalOverlay}
+        >
           <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{initialValues ? "Edit Job" : "Post New Job"}</Text>
-                <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }}>
-                  <FontAwesome name="close" size={24} color="#999" />
-                </TouchableOpacity>
-              </View>
+            
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{initialValues ? "Edit Job" : "Post New Job"}</Text>
+              <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }}>
+                <FontAwesome name="close" size={24} color="#999" />
+              </TouchableOpacity>
+            </View>
 
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 20}}>
+              
               <Text style={styles.label}>Job Title</Text>
               <TextInput style={styles.input} placeholder="e.g. Catering Helper" value={title} onChangeText={setTitle} />
 
@@ -147,41 +210,37 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
               <Text style={styles.label}>Location</Text>
               <TextInput style={styles.input} placeholder="e.g. 123 Main St, Chennai" value={location} onChangeText={setLocation} />
 
-              {/* 🟢 HYBRID DATE INPUT: Logic split based on Platform */}
               <Text style={styles.label}>Work Date</Text>
               
               {Platform.OS === 'web' ? (
-                // 🌐 WEB VIEW: Simple Text Input (Reliable)
                 <TextInput 
                     style={styles.input} 
-                    placeholder="e.g. 25 Oct 2024" 
-                    value={jobDate} 
-                    onChangeText={setJobDate} 
+                    placeholder="YYYY-MM-DD" 
+                    value={displayDate} 
+                    onChangeText={setDisplayDate} 
                 />
               ) : (
-                // 📱 MOBILE VIEW: Calendar Picker (Fancy)
                 <View>
                     <TouchableOpacity 
                         style={styles.dateInput} 
                         onPress={() => setShowDatePicker(true)}
                     >
                         <FontAwesome name="calendar" size={18} color="#007AFF" style={{ marginRight: 10 }} />
-                        <Text style={{ color: jobDate ? '#000' : '#999', fontSize: 16 }}>
-                        {jobDate || "Select Date"}
+                        <Text style={{ color: displayDate ? '#000' : '#999', fontSize: 16 }}>
+                        {displayDate || "Select Date"}
                         </Text>
                     </TouchableOpacity>
 
                     {showDatePicker && (
                         <DateTimePicker
-                        value={dateObject}
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onDateChange}
-                        minimumDate={new Date()} 
+                            value={dateObject}
+                            mode="date"
+                            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                            onChange={onDateChange}
+                            minimumDate={new Date()}
                         />
                     )}
                     
-                    {/* iOS Close Button */}
                     {Platform.OS === 'ios' && showDatePicker && (
                         <TouchableOpacity 
                             style={styles.iosCloseBtn} 
@@ -193,14 +252,12 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
                 </View>
               )}
 
-              {/* Timing */}
               <Text style={styles.label}>Shift Timing</Text>
               <View style={styles.row}>
                 <TextInput style={[styles.input, { flex: 1, marginRight: 10 }]} placeholder="Start (9 AM)" value={startTime} onChangeText={setStartTime} />
                 <TextInput style={[styles.input, { flex: 1 }]} placeholder="End (5 PM)" value={endTime} onChangeText={setEndTime} />
               </View>
 
-              {/* Food & Dress */}
               <TouchableOpacity onPress={() => setHasFood(!hasFood)} style={styles.checkRow}>
                 <FontAwesome name={hasFood ? "check-square" : "square-o"} size={24} color="#007AFF" />
                 <Text style={styles.checkLabel}>Food Provided?</Text>
@@ -224,7 +281,7 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
 
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -238,27 +295,10 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, height: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 22, fontWeight: 'bold' },
-  label: { fontSize: 14, fontWeight: '600', marginBottom: 5, color: '#555', marginTop: 10 },
+  label: { fontSize: 14, fontWeight: '600', marginBottom: 5, color: '#555', marginTop: 15 },
   input: { backgroundColor: '#f2f2f7', padding: 12, borderRadius: 10, fontSize: 16, borderWidth: 1, borderColor: '#e1e1e1' },
-  
-  // Date Button
-  dateInput: { 
-    backgroundColor: '#E1F5FE', 
-    padding: 12, 
-    borderRadius: 10, 
-    flexDirection: 'row', 
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#007AFF'
-  },
-  iosCloseBtn: {
-      backgroundColor: '#007AFF', 
-      padding: 10, 
-      alignItems: 'center', 
-      borderRadius: 10, 
-      marginTop: 5
-  },
-
+  dateInput: { backgroundColor: '#fff', padding: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e1e1e1' },
+  iosCloseBtn: { backgroundColor: '#007AFF', padding: 10, alignItems: 'center', borderRadius: 10, marginTop: 5, marginBottom: 10 },
   row: { flexDirection: 'row' },
   checkRow: { flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 5 },
   checkLabel: { marginLeft: 10, fontSize: 16 },
