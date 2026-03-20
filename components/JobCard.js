@@ -17,6 +17,11 @@ export default function JobCard({
     ? new Date(jobData.created_at).toLocaleDateString() 
     : 'Recently';
 
+  // 🟢 NEW LOGIC: Calculate Spots Left
+  const total = jobData?.total_vacancies || 1;
+  const filled = jobData?.filled_vacancies || 0;
+  const spotsLeft = total - filled;
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       
@@ -28,7 +33,7 @@ export default function JobCard({
             {/* Location + Distance Row */}
             <View style={styles.locationRow}>
                 
-                {/* 🟢 NEW: Distance Badge */}
+                {/* Distance Badge */}
                 {distance && (
                     <View style={styles.distanceBadge}>
                         <FontAwesome name="location-arrow" size={10} color="#007AFF" style={{marginRight: 4}} />
@@ -51,10 +56,19 @@ export default function JobCard({
       {/* 🟢 2. Middle Section */}
       {isOwner ? (
         <View style={styles.metaRow}>
-            <View style={[styles.badge, { backgroundColor: jobData?.status === 'OPEN' ? '#E1F5FE' : '#F5F5F5' }]}>
-                <Text style={{ color: jobData?.status === 'OPEN' ? '#0288D1' : '#666', fontSize: 12, fontWeight: 'bold' }}>
-                    {jobData?.status || 'OPEN'}
-                </Text>
+            <View style={{flexDirection: 'row', gap: 8}}>
+                <View style={[styles.badge, { backgroundColor: jobData?.status === 'OPEN' ? '#E1F5FE' : '#F5F5F5' }]}>
+                    <Text style={{ color: jobData?.status === 'OPEN' ? '#0288D1' : '#666', fontSize: 12, fontWeight: 'bold' }}>
+                        {jobData?.status || 'OPEN'}
+                    </Text>
+                </View>
+
+                {/* 🟢 NEW: Owner Vacancy Badge */}
+                <View style={[styles.badge, { backgroundColor: spotsLeft > 0 ? '#E8F5E9' : '#FFEBEE' }]}>
+                    <Text style={{ color: spotsLeft > 0 ? '#2E7D32' : '#C62828', fontSize: 12, fontWeight: 'bold' }}>
+                        {filled}/{total} Filled
+                    </Text>
+                </View>
             </View>
             <Text style={styles.date}>{dateStr}</Text>
         </View>
@@ -67,9 +81,21 @@ export default function JobCard({
                     <FontAwesome name="user" size={14} color="#666" />
                 </View>
             )}
-            <Text style={styles.employerName}>
-                {profile?.full_name || profile?.username || "Employer"}
-            </Text>
+            
+            {/* 🟢 NEW: Flex container to hold Name and Spots Left */}
+            <View style={{flex: 1}}>
+                <Text style={styles.employerName}>
+                    {profile?.full_name || profile?.username || "Employer"}
+                </Text>
+                
+                {/* Applicant Urgency Badge */}
+                {jobData?.status === 'OPEN' && (
+                    <Text style={{ color: spotsLeft > 0 ? '#FF9500' : '#C62828', fontSize: 12, fontWeight: 'bold', marginTop: 2 }}>
+                        {spotsLeft > 0 ? `🔥 Only ${spotsLeft} spots left!` : '🛑 FULL'}
+                    </Text>
+                )}
+            </View>
+
             <Text style={styles.dot}>•</Text>
             <Text style={styles.date}>{dateStr}</Text>
         </View>
@@ -164,8 +190,8 @@ const styles = StyleSheet.create({
     borderTopColor: '#f0f0f0',
     paddingTop: 10,
   },
-  avatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8, backgroundColor: '#eee' },
-  avatarPlaceholder: { width: 24, height: 24, borderRadius: 12, marginRight: 8, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
+  avatar: { width: 32, height: 32, borderRadius: 16, marginRight: 10, backgroundColor: '#eee' }, // 🟢 Increased size slightly for better proportions with two lines of text
+  avatarPlaceholder: { width: 32, height: 32, borderRadius: 16, marginRight: 10, backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
   employerName: { fontSize: 14, fontWeight: '600', color: '#555' },
   dot: { marginHorizontal: 6, color: '#ccc' },
   date: { fontSize: 12, color: '#999' },

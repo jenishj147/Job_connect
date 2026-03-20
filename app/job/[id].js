@@ -82,8 +82,7 @@ export default function JobDetailsScreen() {
     if (!location) return;
     
     const encodedLocation = encodeURIComponent(location);
-    // Fixed URL format for Web & Mobile
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodedLocation}`;
+    const url = `https://maps.google.com/?q=${encodedLocation}`;
 
     Linking.openURL(url).catch(err => 
       Alert.alert("Error", "Could not open map.")
@@ -124,23 +123,44 @@ export default function JobDetailsScreen() {
   }
 
   // --- OWNER ACTION: Hire Candidate ---
-  // 🟢 NOTE: This sets status to 'ACCEPTED'. 
-  // Make sure your RootLayout listener checks for 'ACCEPTED', not 'hired'.
+  // 🟢 UPGRADED: Increments filled_vacancies and triggers CLOSED if full
   async function handleHire(applicationId, applicantName) {
     
     const executeHireLogic = async () => {
         try {
-            const { error } = await supabase
+            // 1. Mark Application as ACCEPTED
+            const { error: appError } = await supabase
               .from('applications')
-              .update({ status: 'ACCEPTED' }) // 👈 This triggers the notification
+              .update({ status: 'ACCEPTED' }) 
               .eq('id', applicationId);
 
-            if (error) throw error;
+            if (appError) throw appError;
 
-            // Update Local State immediately for UI feedback
+            // 2. Calculate New Vacancy Status
+            const newFilledCount = (job.filled_vacancies || 0) + 1;
+            const isNowFull = newFilledCount >= (job.total_vacancies || 1);
+
+            // 3. Update the Job in Database
+            const { error: jobError } = await supabase
+              .from('jobs')
+              .update({ 
+                  filled_vacancies: newFilledCount,
+                  status: isNowFull ? 'CLOSED' : 'OPEN' // Trigger does this too, but syncs state immediately
+              })
+              .eq('id', id);
+
+            if (jobError) throw jobError;
+
+            // 4. Update Local State immediately for UI feedback
             setApplicants(prev => prev.map(app => 
               app.id === applicationId ? { ...app, status: 'ACCEPTED' } : app
             ));
+
+            setJob(prev => ({ 
+                ...prev, 
+                filled_vacancies: newFilledCount,
+                status: isNowFull ? 'CLOSED' : 'OPEN'
+            }));
 
             if (Platform.OS === 'web') {
                 alert(`${applicantName} has been hired!`);
@@ -149,7 +169,7 @@ export default function JobDetailsScreen() {
             }
         } catch (err) {
             console.error(err);
-            Alert.alert("Error", "Could not update status.");
+            Alert.alert("Error", "Could not process hire.");
         }
     };
 
@@ -177,6 +197,7 @@ export default function JobDetailsScreen() {
   if (!job) return <View style={styles.center}><Text>Job not found</Text></View>;
 
   const isOwner = session?.user?.id === job?.user_id;
+  const isJobFull = (job.filled_vacancies || 0) >= (job.total_vacancies || 1);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -196,10 +217,19 @@ export default function JobDetailsScreen() {
             <Text style={styles.jobTitle}>{job.title}</Text>
             <Text style={styles.jobPrice}>₹{job.amount}</Text>
             
-            <View style={[styles.statusBadge, { backgroundColor: job.status === 'OPEN' ? '#e1f5fe' : '#ffebee' }]}>
-                <Text style={{ color: job.status === 'OPEN' ? '#0288d1' : '#c62828', fontWeight: 'bold' }}>
-                    {job.status}
-                </Text>
+            <View style={{flexDirection: 'row', gap: 10}}>
+                <View style={[styles.statusBadge, { backgroundColor: job.status === 'OPEN' ? '#e1f5fe' : '#ffebee' }]}>
+                    <Text style={{ color: job.status === 'OPEN' ? '#0288d1' : '#c62828', fontWeight: 'bold' }}>
+                        {job.status}
+                    </Text>
+                </View>
+
+                {/* 🟢 NEW: Capacity Badge */}
+                <View style={[styles.statusBadge, { backgroundColor: '#FFF3E0' }]}>
+                    <Text style={{ color: '#E65100', fontWeight: 'bold' }}>
+                        {job.filled_vacancies || 0} / {job.total_vacancies || 1} Filled
+                    </Text>
+                </View>
             </View>
 
             <View style={styles.divider} />
@@ -213,7 +243,7 @@ export default function JobDetailsScreen() {
                     </View>
                 )}
                 
-                {/* 🟢 CLICKABLE LOCATION */}
+                {/* CLICKABLE LOCATION */}
                 {job.location && (
                     <TouchableOpacity 
                         style={styles.detailRow} 
@@ -233,6 +263,10 @@ export default function JobDetailsScreen() {
                     <Text style={styles.detailText}>{job.shift_start || "--"} to {job.shift_end || "--"}</Text>
                 </View>
                 <View style={styles.detailRow}>
+                    <FontAwesome name="users" size={18} color="#666" style={styles.iconWidth} />
+                    <Text style={styles.detailText}>{job.total_vacancies || 1} Person(s) Required</Text>
+                </View>
+                <View style={styles.detailRow}>
                     <FontAwesome name="cutlery" size={18} color="#666" style={styles.iconWidth} />
                     <Text style={styles.detailText}>{job.has_food ? "Food Provided" : "No Food"}</Text>
                 </View>
@@ -245,7 +279,7 @@ export default function JobDetailsScreen() {
                 <Text style={styles.sectionTitle}>Applicants ({applicants.length})</Text>
                 
                 {applicants.map((item) => {
-                    const isHired = item.status === 'ACCEPTED'; // 🟢 Check 'ACCEPTED'
+                    const isHired = item.status === 'ACCEPTED'; 
                     return (
                         <View key={item.id} style={styles.applicantCard}>
                             <View style={styles.row}>
@@ -274,9 +308,11 @@ export default function JobDetailsScreen() {
                                          <FontAwesome name="check" size={16} color="#34C759" />
                                     </View>
                                 ) : (
+                                    // 🟢 NEW: Disable hire button if job is full
                                     <TouchableOpacity 
                                         onPress={() => handleHire(item.id, item.profiles?.full_name)} 
-                                        style={[styles.smBtn, {backgroundColor: '#007AFF'}]}
+                                        style={[styles.smBtn, {backgroundColor: isJobFull ? '#CCC' : '#007AFF'}]}
+                                        disabled={isJobFull}
                                     >
                                         <Text style={{color:'white', fontSize: 12, fontWeight: 'bold'}}>Hire</Text>
                                     </TouchableOpacity>
@@ -303,13 +339,14 @@ export default function JobDetailsScreen() {
                         <Text style={styles.applyText}>Applied</Text>
                     </View>
                 ) : (
+                    // 🟢 NEW: Disable apply button if job is full
                     <TouchableOpacity 
-                        style={styles.applyButton} 
+                        style={[styles.applyButton, { backgroundColor: isJobFull ? '#CCC' : '#007AFF' }]} 
                         onPress={handleApply}
-                        disabled={applying}
+                        disabled={applying || isJobFull}
                     >
                         {applying ? <ActivityIndicator color="white" /> : (
-                            <Text style={styles.applyText}>Apply Now</Text>
+                            <Text style={styles.applyText}>{isJobFull ? 'Job Full' : 'Apply Now'}</Text>
                         )}
                     </TouchableOpacity>
                 )}

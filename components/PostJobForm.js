@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Location from 'expo-location'; // 🟢 1. IMPORT LOCATION
+import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,12 +20,17 @@ import { supabase } from '../supabase';
 export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [locLoading, setLocLoading] = useState(false); // Loading state for GPS
 
   // Form Fields
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [location, setLocation] = useState('');
+  const [vacancies, setVacancies] = useState('1'); // 🟢 Vacancies State
+  const [locationText, setLocationText] = useState('');
   
+  // 🟢 Store Coordinates Separately
+  const [coords, setCoords] = useState({ lat: null, long: null });
+
   // Date State
   const [dateObject, setDateObject] = useState(new Date()); 
   const [displayDate, setDisplayDate] = useState('');       
@@ -41,8 +46,15 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
     if (initialValues) {
       setTitle(initialValues.title || '');
       setAmount(initialValues.amount ? initialValues.amount.toString() : '');
-      setLocation(initialValues.location || '');
+      setVacancies(initialValues.total_vacancies ? initialValues.total_vacancies.toString() : '1'); // 🟢 Load Vacancies
+      setLocationText(initialValues.location || '');
       
+      // Load existing coords if editing
+      setCoords({
+        lat: initialValues.latitude || null,
+        long: initialValues.longitude || null
+      });
+
       if (initialValues.job_date) {
          const d = new Date(initialValues.job_date);
          setDateObject(d);
@@ -71,33 +83,49 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
     }
   };
 
-  // 🟢 2. GEOCODING FUNCTION
-  async function getCoordinates(address) {
+  // 🟢 FEATURE: GET CURRENT GPS LOCATION
+  const handleCurrentLocation = async () => {
+    setLocLoading(true);
     try {
-      // Check/Request Permissions
+      // 1. Permission
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Permission to access location was denied');
-        return { lat: null, long: null };
+        Alert.alert('Permission Denied', 'Allow location access to use this feature.');
+        setLocLoading(false);
+        return;
       }
 
-      // Convert Address to Coordinates
-      let geocodedLocation = await Location.geocodeAsync(address);
+      // 2. Get GPS Coords
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = location.coords;
+
+      // 3. Save to State
+      setCoords({ lat: latitude, long: longitude });
+      console.log("📍 GPS Fetched:", latitude, longitude);
+
+      // 4. Reverse Geocode (Get Address from Coords)
+      let addressResponse = await Location.reverseGeocodeAsync({ latitude, longitude });
       
-      if (geocodedLocation.length > 0) {
-        return { 
-            lat: geocodedLocation[0].latitude, 
-            long: geocodedLocation[0].longitude 
-        };
+      if (addressResponse.length > 0) {
+        const addr = addressResponse[0];
+        // Construct a readable address string
+        const fullAddress = `${addr.street || ''} ${addr.city || ''}, ${addr.region || ''}`;
+        setLocationText(fullAddress.trim());
+      } else {
+        setLocationText("Current Location");
       }
-    } catch (error) {
-      console.log("Geocoding Error:", error);
-    }
-    return { lat: null, long: null };
-  }
 
+    } catch (error) {
+      Alert.alert("Error", "Could not fetch location. Make sure GPS is on.");
+      console.log(error);
+    } finally {
+      setLocLoading(false);
+    }
+  };
+
+  // 🟢 SUBMIT
   async function handleSubmit() {
-    if (!title || !amount || !location || !displayDate || !startTime) {
+    if (!title || !amount || !locationText || !displayDate || !startTime) {
       Alert.alert("Missing Info", "Please fill in Title, Amount, Location, Date, and Start Time.");
       return;
     }
@@ -114,24 +142,36 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
             return;
         }
 
-        // 🟢 3. GET COORDINATES BEFORE SAVING
-        const { lat, long } = await getCoordinates(location);
+        // 🟢 FINAL CHECK: If no GPS coords yet, try to geocode the text as fallback
+        let finalLat = coords.lat;
+        let finalLong = coords.long;
 
-        // Debug Log
-        console.log(`Geocoded '${location}':`, lat, long);
+        if (!finalLat || !finalLong) {
+            console.log("⚠️ No GPS data, attempting fallback geocoding...");
+            let geocoded = await Location.geocodeAsync(locationText);
+            if (geocoded.length > 0) {
+                finalLat = geocoded[0].latitude;
+                finalLong = geocoded[0].longitude;
+            } else {
+                // If even fallback fails, use a Default (e.g., Chennai) to prevent crash
+                finalLat = 13.0827;
+                finalLong = 80.2707;
+            }
+        }
 
         const jobData = {
             title,
             amount: parseInt(amount) || 0,
             user_id: user.id,
-            location, // Text address
-            latitude: lat, // 🟢 Save Latitude
-            longitude: long, // 🟢 Save Longitude
+            location: locationText, 
+            latitude: finalLat,     // 🟢 SAVING GPS LAT
+            longitude: finalLong,   // 🟢 SAVING GPS LONG
             job_date: formatDateForDB(dateObject),
             shift_start: startTime,
             shift_end: endTime,
             has_food: hasFood,
             dress_code: dressCode,
+            total_vacancies: parseInt(vacancies) || 1, // 🟢 Save Vacancies to DB
             status: 'OPEN'
         };
 
@@ -157,15 +197,16 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
         if (onJobPosted) onJobPosted();
 
     } catch (error) {
-        Alert.alert("Error", error.message);
+        Alert.alert("Database Error", error.message);
     } finally {
         setLoading(false);
     }
   }
 
   function resetForm() {
-    setTitle(''); setAmount(''); setLocation(''); setDisplayDate('');
+    setTitle(''); setAmount(''); setVacancies('1'); setLocationText(''); setDisplayDate('');
     setStartTime(''); setEndTime('');
+    setCoords({ lat: null, long: null }); // Reset coords
     setDateObject(new Date());
     setHasFood(false); setDressCode('Casual');
     if (onCancelEdit) onCancelEdit();
@@ -204,14 +245,35 @@ export default function PostJobForm({ onJobPosted, initialValues, onCancelEdit }
               <Text style={styles.label}>Job Title</Text>
               <TextInput style={styles.input} placeholder="e.g. Catering Helper" value={title} onChangeText={setTitle} />
 
-              <Text style={styles.label}>Pay Amount (₹)</Text>
-              <TextInput style={styles.input} placeholder="e.g. 500" keyboardType="numeric" value={amount} onChangeText={setAmount} />
+              <View style={styles.row}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text style={styles.label}>Pay Amount (₹)</Text>
+                  <TextInput style={styles.input} placeholder="e.g. 500" keyboardType="numeric" value={amount} onChangeText={setAmount} />
+                </View>
+                
+                {/* 🟢 Persons Required Input */}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Persons Required</Text>
+                  <TextInput style={styles.input} placeholder="e.g. 5" keyboardType="numeric" value={vacancies} onChangeText={setVacancies} />
+                </View>
+              </View>
 
+              {/* 🟢 LOCATION SECTION WITH BUTTON */}
               <Text style={styles.label}>Location</Text>
-              <TextInput style={styles.input} placeholder="e.g. 123 Main St, Chennai" value={location} onChangeText={setLocation} />
+              <View style={styles.locationRow}>
+                  <TextInput 
+                    style={[styles.input, { flex: 1, marginBottom: 0 }]} 
+                    placeholder="e.g. 123 Main St" 
+                    value={locationText} 
+                    onChangeText={setLocationText} 
+                  />
+                  <TouchableOpacity style={styles.gpsBtn} onPress={handleCurrentLocation} disabled={locLoading}>
+                      {locLoading ? <ActivityIndicator color="white" size="small" /> : <FontAwesome name="crosshairs" size={20} color="white" />}
+                  </TouchableOpacity>
+              </View>
+              {coords.lat && <Text style={{fontSize: 12, color: 'green', marginTop: 5}}>✅ GPS Coordinates Captured</Text>}
 
               <Text style={styles.label}>Work Date</Text>
-              
               {Platform.OS === 'web' ? (
                 <TextInput 
                     style={styles.input} 
@@ -297,6 +359,19 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 22, fontWeight: 'bold' },
   label: { fontSize: 14, fontWeight: '600', marginBottom: 5, color: '#555', marginTop: 15 },
   input: { backgroundColor: '#f2f2f7', padding: 12, borderRadius: 10, fontSize: 16, borderWidth: 1, borderColor: '#e1e1e1' },
+  
+  // 🟢 NEW GPS BUTTON STYLES
+  locationRow: { flexDirection: 'row', alignItems: 'center' },
+  gpsBtn: {
+      backgroundColor: '#007AFF',
+      padding: 12,
+      borderRadius: 10,
+      marginLeft: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+      width: 50
+  },
+
   dateInput: { backgroundColor: '#fff', padding: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e1e1e1' },
   iosCloseBtn: { backgroundColor: '#007AFF', padding: 10, alignItems: 'center', borderRadius: 10, marginTop: 5, marginBottom: 10 },
   row: { flexDirection: 'row' },
