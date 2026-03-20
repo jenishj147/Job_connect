@@ -237,6 +237,13 @@ export default function FindWorkScreen() {
   function applyFilters(sourceData = allJobs, text = searchText, pay = minPay, food = foodOnly, sort = sortBy) {
     let result = [...sourceData];
 
+    // 🟢 NEW LOGIC: Filter out jobs that have no vacancies left
+    result = result.filter(job => {
+      const total = job.total_vacancies || 1;
+      const filled = job.filled_vacancies || 0;
+      return (total - filled) > 0;
+    });
+
     if (text) {
       const lower = text.toLowerCase();
       result = result.filter(job => 

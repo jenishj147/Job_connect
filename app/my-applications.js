@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router'; // 🟢 Added useRouter
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,9 +13,10 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { supabase } from '../supabase'; // 👈 FIXED IMPORT PATH
+import { supabase } from '../supabase';
 
 export default function MyApplicationsScreen() {
+  const router = useRouter(); // 🟢 Used for navigating to job details
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -40,23 +41,25 @@ export default function MyApplicationsScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // 3. Fetch Data
+      // 3. Fetch Data (INCLUDING job status and id)
       const { data, error } = await supabase
         .from('applications')
         .select(`
           id, 
           status, 
           created_at,
+          job_id,
           jobs (
+            id,
             title, 
             amount,
+            status, 
             profiles:user_id ( 
               full_name,
               phone       
             )
           )
         `)
-        // ^^^ USING 'phone' (matches your DB)
         .eq('applicant_id', session.user.id)
         .order('created_at', { ascending: false });
 
@@ -89,7 +92,6 @@ export default function MyApplicationsScreen() {
     if (type === 'call') {
       url = `tel:${cleanPhone}`;
     } else {
-      // WhatsApp Scheme
       url = `whatsapp://send?phone=${cleanPhone}`; 
     }
 
@@ -99,7 +101,6 @@ export default function MyApplicationsScreen() {
       if (supported) {
         await Linking.openURL(url);
       } else {
-        // Fallback for WhatsApp if the app isn't installed
         if (type === 'wa') {
            await Linking.openURL(`https://wa.me/${cleanPhone.replace('+', '')}`);
         } else {
@@ -113,26 +114,53 @@ export default function MyApplicationsScreen() {
 
   const renderItem = ({ item }) => {
     const job = item.jobs;
-    const employer = job?.profiles; 
-    
-    // 🟢 FIXED: Use 'phone' directly
-    const employerPhone = employer?.phone;
+    const appStatus = item.status?.toUpperCase() || 'PENDING';
+    const isHired = appStatus === 'ACCEPTED' || appStatus === 'HIRED';
+    const isRejected = appStatus === 'REJECTED';
 
-    // 🟢 FIXED: Match status from previous screen ('ACCEPTED')
-    const status = item.status?.toUpperCase();
-    const isHired = status === 'ACCEPTED' || status === 'HIRED';
-
+    // 🟢 SCENARIO 1: DELETED JOB (Job returns null because employer deleted it)
     if (!job) {
       return (
-        <View style={[styles.card, { opacity: 0.6 }]}>
-          <Text style={styles.jobTitle}>Job Post Unavailable</Text>
-          <Text style={styles.statusText}>The employer removed this listing.</Text>
+        <View style={[styles.card, { opacity: 0.5, backgroundColor: '#f0f0f0' }]}>
+          <View style={styles.cardHeader}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={[styles.jobTitle, { color: '#888', textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                  Job Unavailable
+                </Text>
+            </View>
+            <View style={[styles.badge, { backgroundColor: '#888' }]}>
+              <Text style={styles.badgeText}>DELETED</Text>
+            </View>
+          </View>
+          <Text style={styles.statusText}>The employer removed this listing entirely.</Text>
         </View>
       );
     }
 
+    const employer = job?.profiles; 
+    const employerPhone = employer?.phone;
+    const jobStatus = job.status?.toUpperCase() || 'OPEN';
+    const isJobClosed = jobStatus === 'CLOSED';
+
+    // Determine Application Badge Style
+    let appBadgeStyle = styles.bgPending;
+    let appBadgeText = 'PENDING';
+    
+    if (isHired) {
+        appBadgeStyle = styles.bgSuccess;
+        appBadgeText = 'HIRED ✅';
+    } else if (isRejected) {
+        appBadgeStyle = styles.bgRejected;
+        appBadgeText = 'REJECTED';
+    }
+
+    // 🟢 SCENARIO 2 & 3: ACTIVE OR CLOSED JOB
     return (
-      <View style={styles.card}>
+      <TouchableOpacity 
+        style={[styles.card, (isJobClosed || isRejected) && !isHired && { opacity: 0.75 }]}
+        activeOpacity={0.8}
+        onPress={() => router.push({ pathname: "/job/[id]", params: { id: job.id } })} // 🟢 Let user view the job
+      >
         {/* Header Section */}
         <View style={styles.cardHeader}>
           <View style={{ flex: 1, paddingRight: 10 }}>
@@ -142,10 +170,20 @@ export default function MyApplicationsScreen() {
             </Text>
           </View>
           
-          <View style={[styles.badge, isHired ? styles.bgSuccess : styles.bgPending]}>
-            <Text style={styles.badgeText}>
-              {isHired ? "HIRED ✅" : status || 'PENDING'}
-            </Text>
+          {/* Status Badges Group */}
+          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              
+              {/* 1. Application Status Badge */}
+              <View style={[styles.badge, appBadgeStyle]}>
+                <Text style={styles.badgeText}>{appBadgeText}</Text>
+              </View>
+
+              {/* 2. Job Closed Badge (Only show if the job is closed AND user is NOT hired) */}
+              {isJobClosed && !isHired && !isRejected && (
+                  <View style={[styles.badge, styles.bgClosed]}>
+                    <Text style={styles.badgeText}>JOB FULL / CLOSED</Text>
+                  </View>
+              )}
           </View>
         </View>
 
@@ -153,7 +191,7 @@ export default function MyApplicationsScreen() {
           Applied: {new Date(item.created_at).toLocaleDateString()}
         </Text>
 
-        {/* 🟢 CONDITIONAL RENDER: Contact Buttons */}
+        {/* Contact Buttons (Only visible if hired) */}
         {isHired && (
           <View style={styles.contactSection}>
             <Text style={styles.contactLabel}>
@@ -181,7 +219,7 @@ export default function MyApplicationsScreen() {
             </View>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -251,12 +289,14 @@ const styles = StyleSheet.create({
   amountText: { fontSize: 14, color: '#666' },
   amountValue: { fontWeight: '700', color: '#34C759' },
   dateText: { fontSize: 12, color: '#A0A0A0', marginTop: 10 },
-  statusText: { color: '#888', marginTop: 5 },
+  statusText: { color: '#888', marginTop: 5, fontSize: 13 },
   
   badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   badgeText: { color: 'white', fontWeight: 'bold', fontSize: 10 },
   bgPending: { backgroundColor: '#FF9500' },
   bgSuccess: { backgroundColor: '#34C759' },
+  bgRejected: { backgroundColor: '#8E8E93' }, // 🟢 Added Rejected Style
+  bgClosed: { backgroundColor: '#FF3B30' },  // 🟢 Added Closed Style
   
   contactSection: {
     marginTop: 15,
